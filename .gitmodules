@@ -1,0 +1,10 @@
+[submodule "upstream"]
+	path = upstream
+	url = https://github.com/libertine-linux-forks/linux-stable.git
+	branch = libertine
+[submodule "spl_upstream"]
+	path = spl_upstream
+	url = https://github.com/zfsonlinux/spl
+[submodule "zfs_upstream"]
+	path = zfs_upstream
+	url = https://github.com/zfsonlinux/zfs

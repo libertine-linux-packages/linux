@@ -1,0 +1,784 @@
+# This file is part of libertine linux's package linux. It is subject to the license terms in the COPYRIGHT file found in the top-level directory of this distribution and at https://raw.githubusercontent.com/libertine-linux-packages/linux/master/COPYRIGHT. No part of libertine linux's package linux, including this file, may be copied, modified, propagated, or distributed except according to the terms contained in the COPYRIGHT file.
+# Copyright © 2016 The developers of libertine linux's package linux. See the COPYRIGHT file in the top-level directory of this distribution and at https://raw.githubusercontent.com/libertine-linux-packages/linux/master/COPYRIGHT.
+
+
+variant=fork
+
+depends build_gnumake
+build_needs make
+
+depends build_ccache
+build_needs ccache
+
+case "$package" in
+	
+	linux_prep|linux)
+		
+		depends build_bash
+		build_needs bash
+		
+		depends build_netbsd_src_patch
+		build_needs patch
+		
+		depends build_perl
+		build_needs perl
+		
+		depends build_musl_cross_make_build
+		build_needs "$libertine_build"-cc "$libertine_build"-gcc "$libertine_build"-c++ "$libertine_build"-g++ "$libertine_build"-ar "$libertine_build"-ld "$libertine_build"-ranlib
+		
+		depends build_musl_cross_make_host
+		build_needs "$libertine_host"-cc "$libertine_host"-gcc "$libertine_host"-ar "$libertine_host"-ld "$libertine_host"-ranlib "$libertine_host"-strip "$libertine_host"-nm "$libertine_host"-objcopy "$libertine_host"-objdump
+		
+		depends build_bc
+		build_needs bc
+		
+		depends build_busybox
+		build_needs cmp tail bzip2 od cut touch xargs echo sort uniq mktemp dirname basename install sed gzip date head fgrep readlink expr wc uname
+
+		# Needs the 'full' xz, not BusyBox's
+		depends build_xz_utils_xz
+		build_needs xz
+		
+		depends build_libressl
+		depends build_zlib
+				
+		# SPL / ZFS
+		if core_variable_isUnset linux_prep_enableZfs; then
+			linux_prep_enableZfs='true'
+		fi
+		if $linux_prep_enableZfs; then
+			depends zlib libuuid libtirpc libblkid
+		fi
+		
+		depends build_slibtool
+		build_needs clibtool-static libtoolize
+		
+		build_needs autoreconf autoconf autoheader automake aclocal expr autom4te m4 install sort ls sleep
+	;;
+	
+esac
+
+case "$package" in
+	
+	build_musl_cross_make_linux)
+		
+		libertine_compile_build_musl_cross_make_linux()
+		{
+			:
+		}
+		
+	;;
+	
+	linux_prep)
+				
+		build_needs rm ln
+		libertine_compile_linux_prep()
+		{	
+			# Empty CPIO archive input file
+			printf '' >"$(libertine_public_outputInitramfsContentsFilePath)"
+			
+			local configFilePath="$(libertine_public_sourcePath)"/.config
+			
+			_libertine_compile_linux_menuconfigAdjustments "$configFilePath" "$(libertine_public_outputInitramfsContentsFilePath)"
+			
+			_libertine_compile_linux_prep_menuconfigAlterationsBeforeNonKernelSuppliedModules "$configFilePath"
+			
+			# Prepare for, and then build, extra modules
+			_libertine_compile_linux_make "$(libertine_public_sourcePath)" prepare scripts
+			
+			if $linux_prep_enableZfs; then
+				_libertine_compile_linux_prep_nonKernelSuppliedModuleSpl
+				_libertine_compile_linux_prep_nonKernelSuppliedModuleZfs
+				_libertine_compile_linux_prep_menuconfigAlterationsForZfsAfterNonKernelSuppliedModules "$configFilePath"
+			fi
+			
+			_libertine_compile_linux_make "$(libertine_public_sourcePath)"
+	
+			rm -rf "$(libertine_public_outputMiscPath)"
+			ln -s copy/"$variant" "$(libertine_public_outputMiscPath)"
+		}
+		
+		build_needs sed rm cp
+		_libertine_compile_linux_prep_nonKernelSuppliedModuleSpl()
+		{
+			pushd "$(libertine_public_packagePath)"/spl_upstream
+				
+				_libertine_compile_linux_prep_fixForBusybox
+				
+				# Remove stuff that (a) requires fixes and (b) slows down the build
+				local tab=$"\t"
+				sed -i -e 's/SUBDIRS = include rpm/SUBDIRS = include/g' -e "s/SUBDIRS += lib cmd man scripts/SUBDIRS += lib scripts/g" -e "/rpm.am/d" -e "/deb.am/d" -e "/tgz.am/d" Makefile.am
+				sed -i -e "/${tab}cmd/d" -e "/${tab}man/d" -e "/${tab}rpm/d" configure.ac
+				
+				sed -i -e 's/AC_PROG_LIBTOOL/LT_INIT/g' configure.ac
+				libtoolize --install --force --verbose
+				cp -a -f -H m4/. config/
+				autoreconf --install --force --verbose || true
+				rm -Rf autom4te.cache
+				cp -a -f -H build-aux/. config/
+				
+				# We do this as SPL looks for a hardcoded 'cpp'
+				libertine_public_addOrReplaceBinaryInPath cpp "$libertine_paths"/build/"$libertine_build"-cpp
+				
+				libertine_public_autoconf_removeCFlags='-ffunction-sections -fdata-sections -Wl,--gc-sections' libertine_public_autoconf_modernAutoconfConfigure \
+					--disable-debug-kmem \
+					--disable-debug-kmem-tracking \
+					--enable-linux-builtin=yes \
+					--with-linux="$(libertine_public_sourcePath)" \
+					--with-linux-obj="$(libertine_public_sourcePath)"
+		
+				#typedef ulong_t				pfn_t;
+				sed -i -e '/typedef.*pfn_t;/d' include/sys/types.h
+				
+				# Requires bash. No really.
+				bash ./copy-builtin "$(libertine_public_sourcePath)"
+		
+				libertine_public_make
+		
+				libertine_public_make DESTDIR="$(libertine_public_outputHostSysrootPath)" install
+		
+			popd
+		}
+		
+		build_needs sed truncate mktemp dd
+		_libertine_compile_linux_prep_nonKernelSuppliedModuleZfs()
+		{
+			libertine_public_populateInputSysroot zlib libuuid libtirpc libblkid
+	
+			pushd "$(libertine_public_packagePath)"/zfs_upstream
+		
+				_libertine_compile_linux_prep_fixForBusybox
+				
+				# Remove stuff that (a) requires even more build binaries and (b) slows down the build
+				local tab=$"\t"
+				sed -i -e "s/SUBDIRS += udev etc man scripts tests lib cmd contrib/SUBDIRS += scripts lib cmd/g" -e "/rpm.am/d" -e "/deb.am/d" -e "/tgz.am/d" Makefile.am
+				sed -i -e "/${tab}udev/d" -e "/${tab}etc/d" -e "/${tab}man/d" -e "/${tab}contrib/d" -e "/${tab}tests/d" -e "/${tab}rpm/d" configure.ac
+				
+				sed -i -e 's/AC_PROG_LIBTOOL/LT_INIT/g' configure.ac
+				libtoolize --install --force --verbose
+				cp -a -f -H m4/. config/
+				autoreconf --install --force --verbose || true
+				rm -Rf autom4te.cache
+				cp -a -f -H build-aux/. config/
+		
+				# We do this as ZFS looks for a hardcoded 'cpp'
+				libertine_public_addOrReplaceBinaryInPath cpp "$libertine_paths"/build/"$libertine_build"-cpp
+				
+				libertine_public_autoconf_removeCFlags='-ffunction-sections -fdata-sections -Wl,--gc-sections -fno-common' libertine_public_autoconf_modernAutoconfConfigure \
+					--disable-debug-dmu-tx \
+				    --enable-linux-builtin=yes \
+				    --with-linux="$(libertine_public_sourcePath)" \
+				    --with-linux-obj="$(libertine_public_sourcePath)" \
+				    --with-spl="$(libertine_public_packagePath)"/spl_upstream \
+				    --with-spl-obj="$(libertine_public_packagePath)"/spl_upstream \
+					--enable-sysvinit \
+					--with-mounthelperdir=/usr/sbin \
+					--with-blkid=yes
+				
+				# zed_log uses read, close, pipe, getpid and relies on glibc header behaviour
+				sed -i -e 's/#include "zed_log.h"/#include <unistd.h>\n#include "zed_log.h"/g' cmd/zed/zed_log.c
+				
+				# Requires bash. No really.
+				bash ./copy-builtin "$(libertine_public_sourcePath)"
+		
+				libertine_public_make
+		
+				libertine_public_make DESTDIR="$(libertine_public_outputHostSysrootPath)" install
+	
+			popd
+			
+			libertine_public_installAndStripBinariesIn sbin mount.zfs zdb zed zfs zhack zinject zpios zpool zstreamdump ztest
+		}
+
+		build_needs id
+		_libertine_compile_linux_prep_menuconfigAlterationsBeforeNonKernelSuppliedModules()
+		{
+			local configFilePath="$1"
+	
+			libertine_public_menuconfig_adjust CONFIG_CROSS_COMPILE "$libertine_host"- true "$configFilePath"
+			libertine_public_menuconfig_adjust CONFIG_INITRAMFS_ROOT_UID "$(id -u)" false "$configFilePath"
+			libertine_public_menuconfig_adjust CONFIG_INITRAMFS_ROOT_GID "$(id -g)" false "$configFilePath"
+		}
+
+		_libertine_compile_linux_prep_menuconfigAlterationsForZfsAfterNonKernelSuppliedModules()
+		{
+			libertine_public_menuconfig_adjust CONFIG_SPL y false "$configFilePath"
+			libertine_public_menuconfig_adjust CONFIG_ZFS y false "$configFilePath"
+		}
+
+		build_needs find xargs grep awk sed
+		_libertine_compile_linux_prep_fixForBusybox()
+		{
+			# Not an exact match, but good enough
+			sed -i -e 's/--canonicalize-existing/-f/g' copy-builtin
+			
+			# Naive
+			sed -i -e 's/--recursive/-r/g' copy-builtin
+
+			local buildBashPath="$(libertine_public_PATH)"/bash
+	
+			# Fix may not be 100% OK, but here we go...
+			find . -type f | xargs grep '#!/bin/bash' | awk -F: '{print $1}' | xargs -r sed -i -e 's;#!/bin/bash;#!'"$buildBashPath"';g'
+			find . -type f | xargs grep 'SHELL := /bin/bash' | awk -F: '{print $1}' | xargs -r sed -i -e 's;SHELL := /bin/bash;SHELL := '"$buildBashPath"';g'
+			find . -type f | xargs grep '$(shell /bin/bash ' | awk -F: '{print $1}' | xargs -r sed -i -e 's;$(shell /bin/bash ;$(shell '"$buildBashPath"' ;g'
+	
+			# Only in Makefile
+			find . -type f | xargs grep 'if [ -x /bin/bash ]; then echo /bin/bash' | awk -F: '{print $1}' | xargs -r sed -i -e 's,if [ -x /bin/bash ]; then echo /bin/bash,if true; then echo '"$buildBashPath"',g'
+		}
+	;;
+	
+	linux)
+		depends linux_prep
+		
+		depends build_rsync
+		build_needs rsync
+		
+		libertine_compile_linux()
+		{
+			local inputPath="$(libertine_public_inputMakePath)"
+			local initramfsContentsFolderPath="$inputPath"/initramfs
+			local outputInitramFsGenerateFilePath="$inputPath"/initramfs.contents
+			
+			_libertine_compile_linux_copyLinuxPrepOutputAndRemoveUnwantedInitramfsStuff
+			
+			_libertine_compile_linux_menuconfigAdjustments "$inputPath"/.config "$outputInitramFsGenerateFilePath"
+			_libertine_compile_linux_menuconfigAlterationsForCmdline "$inputPath"/.config
+			
+			_libertine_compile_linux_initramfs_installMachineFilesystemAsIfItWereOurOwn
+			_libertine_compile_linux_initramfs_createCpioArchiveInputFile "$outputInitramFsGenerateFilePath"
+			
+			_libertine_compile_linux_make "$inputPath"
+			
+			_libertine_compile_linux_replaceInstallShForIncreasedReproducibility
+			
+			_libertine_compile_linux_make "$inputPath" INSTALL_PATH="$(libertine_public_outputMiscPath)" install
+		}
+		
+		build_needs mkdir rm
+		_libertine_compile_linux_copyLinuxPrepOutputAndRemoveUnwantedInitramfsStuff()
+		{
+			mkdir -m 0755 -p "$inputPath"
+			libertine_public_copy "$(libertine_public_outputMiscPath linux_prep)"/. "$(libertine_public_inputMakePath)"/
+			
+			# Remove linux_prep inputs which aren't wanted, so make will rebuild
+			set +f
+				# Usually, the file is initramfs_data.cpio.gz
+				rm -rf "$inputPath"/usr/initramfs_data.cpio* "$inputPath"/usr/initramfs_data.o "$inputPath"/usr/built-in.o
+			set -f
+
+			rm -rf "$initramfsContentsFolderPath"
+			mkdir -m 0755 -p "$initramfsContentsFolderPath"
+			
+			rm -rf "$outputInitramFsGenerateFilePath"
+		}
+		
+		build_needs head
+		_libertine_compile_linux_menuconfigAlterationsForCmdline()
+		{
+			local configFilePath="$1"
+						
+			# Iterate over packages, finding the value of any command-line settings
+			local actualCommandLine=''
+			_libertine_compile_linux_menuconfigAlterationsForCmdline_processPackageCommandLine()
+			{
+				local dependentPackage="$core_variable_array_element"
+			
+				local kernelBootCommandLineFilePath="$(libertine_public_outputKernelBootCommandLineFilePath "$dependentPackage")"
+
+				if [ ! -s "$kernelBootCommandLineFilePath" ]; then
+					return 0
+				fi
+				
+				local value="$(head -n 1 "$kernelBootCommandLineFilePath")"
+				if [ -z "$value" ]; then
+					return 0
+				fi
+				
+				if [ -z "$actualCommandLine" ]; then
+					actualCommandLine="$value"
+				else
+					actualCommandLine="$actualCommandLine $value"
+				fi
+			}
+			core_variable_array_iterate _libertine_compile_built _libertine_compile_linux_menuconfigAlterationsForCmdline_processPackageCommandLine
+			
+			if core_variable_isUnsetOrEmpty linux_postpendToBuiltInCommandLine; then
+				:
+			elif [ -z "$actualCommandLine" ]; then
+				actualCommandLine="$linux_postpendToBuiltInCommandLine"
+			else
+				actualCommandLine="$actualCommandLine $linux_postpendToBuiltInCommandLine"
+			fi
+			
+			if core_variable_isUnset linux_forceUseOfBuiltInCommandLine; then
+				linux_forceUseOfBuiltInCommandLine='false'
+			fi
+
+			if [ -n "$actualCommandLine" ]; then
+				libertine_public_menuconfig_adjust CONFIG_CMDLINE_BOOL y false "$configFilePath"
+				libertine_public_menuconfig_adjust CONFIG_CMDLINE "$actualCommandLine" true "$configFilePath"
+				if $linux_forceUseOfBuiltInCommandLine; then
+					libertine_public_menuconfig_adjust CONFIG_CMDLINE_OVERRIDE y false "$configFilePath"
+				else
+					libertine_public_menuconfig_unset CONFIG_CMDLINE_OVERRIDE "$configFilePath"
+				fi
+			else
+				if $linux_forceUseOfBuiltInCommandLine; then
+					libertine_public_menuconfig_adjust CONFIG_CMDLINE_BOOL y false "$configFilePath"
+					libertine_public_menuconfig_adjust CONFIG_CMDLINE '' true "$configFilePath"
+					libertine_public_menuconfig_adjust CONFIG_CMDLINE_OVERRIDE y false "$configFilePath"
+				fi
+			fi
+		}
+		
+		_libertine_compile_linux_initramfs_installMachineFilesystemAsIfItWereOurOwn()
+		{
+			if [ -d "$libertine_machineSettingsFolderPath"/initramfs ]; then
+				libertine_public_copy_filesystem "$libertine_machineSettingsFolderPath"/initramfs/ "$(libertine_public_outputInitramfsPath)"/
+			fi
+			local contentsFilePath="$libertine_machineSettingsFolderPath"/initramfs.contents
+			if [ -f "$contentsFilePath" ]; then
+				cp -f "$contentsFilePath" "$(libertine_public_outputInitramfsContentsFilePath)"
+			fi
+		}
+		
+		build_needs rm mkdir tac sort find grep cat
+		_libertine_compile_linux_initramfs_createCpioArchiveInputFile()
+		{
+			{
+				core_variable_array_iterate _libertine_compile_built _libertine_compile_linux_initramfs_combineInitramfsSysrootContents
+				
+				# And ourselves (ie machine filesystem)
+				core_variable_array_element='linux' _libertine_compile_linux_initramfs_combineInitramfsSysrootContents
+			} | tac | sort -t ' ' -k 2  >"$outputInitramFsGenerateFilePath".duplicates
+			
+			{
+				local previousPath=''
+				local kind
+				local path
+				local remainder
+				
+				while IFS=' ' read -r kind path remainder
+				do
+					if [ "$path" = "$previousPath" ]; then
+						prinf '%s\n' "WARNING: Path '$path' is duplicated"
+						continue
+					fi
+					
+					printf '%s %s %s\n' "$kind" "$path" "$remainder"
+					previousPath="$path"
+				
+				done <"$outputInitramFsGenerateFilePath".duplicates
+			} >"$outputInitramFsGenerateFilePath".directories-may-not-be-first.overrides
+			
+			{
+				pushd "$initramfsContentsFolderPath"
+			
+					# Setting IFS to . allows us to strip a leading '.' from paths from find
+					# Using -mindepth 1 eliminates './'
+					local empty
+					local path
+					find . -mindepth 1 -depth | while IFS='.' read -r empty path
+					do
+						if ! grep -q -F ' '"$path"' ' "$outputInitramFsGenerateFilePath".directories-may-not-be-first.overrides; then
+							local fileEtcPath=."$path"
+							
+							if [ -L "$fileEtcPath" ]; then
+								printf 'slink %s %s %s 0 0\n' "$path" "$(_libertine_compile_linux_initramfs_symbolicLinkValue "$fileEtcPath")" "$(_libertine_compile_linux_initramfs_octalMode "$fileEtcPath")"
+							elif [ -f "$fileEtcPath" ]; then
+								printf 'file %s %s %s 0 0\n' "$path" initramfs"${path}" "$(_libertine_compile_linux_initramfs_octalMode "$fileEtcPath")"
+							elif [ -d "$fileEtcPath" ]; then
+								printf 'dir %s %s 0 0\n' "$path" "$(_libertine_compile_linux_initramfs_octalMode "$fileEtcPath")"
+							elif [ -b "$fileEtcPath" ]; then
+								printf 'nod %s %s 0 0 b %s\n' "$path" "$(_libertine_compile_linux_initramfs_octalMode "$fileEtcPath")" "$(_libertine_compile_linux_initramfs_deviceMajorAndMinor "$fileEtcPath")"
+							elif [ -c "$fileEtcPath" ]; then
+								printf 'nod %s %s 0 0 c %s\n' "$path" "$(_libertine_compile_linux_initramfs_octalMode "$fileEtcPath")" "$(_libertine_compile_linux_initramfs_deviceMajorAndMinor "$fileEtcPath")"
+							elif [ -p "$fileEtcPath" ]; then
+								printf 'pipe %s %s 0 0\n' "$path" "$(_libertine_compile_linux_initramfs_octalMode "$fileEtcPath")"
+							elif [ -S "$fileEtcPath" ]; then
+								core_exitError $core_commandLine_exitCode_CONFIG "Sockets are not acceptable in a rootfs ram disk"
+							else
+								core_exitError $core_commandLine_exitCode_UNAVAILABLE "What is ${fileEtcPath}?"
+							fi
+						fi
+					done
+					
+				popd
+			} >"$outputInitramFsGenerateFilePath".directories-may-not-be-first.remainder
+			
+			# sort so 'dir' are first
+			cat "$outputInitramFsGenerateFilePath".directories-may-not-be-first.overrides "$outputInitramFsGenerateFilePath".directories-may-not-be-first.remainder | sort >"$outputInitramFsGenerateFilePath"
+		}
+
+		build_needs sed rsync
+		_libertine_compile_linux_initramfs_combineInitramfsSysrootContents()
+		{
+			local dependentPackage="$core_variable_array_element"
+			
+			sed \
+				-e '/^$/d' \
+				-e '/^#/d' \
+				-e '/^[a-z]* \/etc\/combine.d /d' \
+				-e '/^[a-z]* \/etc\/combine.d\/ /d' \
+				-e '/^[a-z]* \/etc\/combine.d\/.*/d' \
+				"$(libertine_public_outputInitramfsContentsFilePath "$dependentPackage")"
+			
+			printf '\n\nADDING PACKAGE TO CPIO: %s\n' "$dependentPackage" 1>&2
+			rsync --archive --itemize-changes --outbuf=Line "$(libertine_public_outputInitramfsPath "$dependentPackage")"/ "$initramfsContentsFolderPath"/ 1>&2
+		}
+		
+		build_needs rm
+		_libertine_compile_linux_initramfs_combineSnippetsAndRemoveFromInitramfs()
+		{
+			local combineFilePath
+			set +f
+			for combineFilePath in "$initramfsContentsFolderPath"/etc/combine.d/*.combine
+			do
+				set -f
+				if [ ! -f "$combineFilePath" ]; then
+					continue
+				fi
+		
+				if [ ! -s "$combineFilePath" ]; then
+					continue
+				fi
+		
+				local folderPath fileName permissions mergeStrategy
+				while IFS=' ' read -r folderPath fileName permissions mergeStrategy
+				do
+	
+					local combinedFolderPath="$parentFolderPath"/"$fileName".d
+					local deleteWhenFinished=true
+					case "$mergeStrategy" in
+		
+						nocombine)
+							_libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategy_nocombine
+							deleteWhenFinished=false
+						;;
+		
+						group)
+							_libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategy_group
+						;;
+		
+						passwd)
+							_libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost _libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost_action_passwd
+						;;
+		
+						shadow)
+							_libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost _libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost_action_shadow
+						;;
+		
+						default)
+							_libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost _libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost_action_default
+						;;
+		
+						hasfiles)
+							_libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost _libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost_action_hasfiles
+						;;
+		
+						nosort)
+							_libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost _libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost_action_nosort
+						;;
+		
+						*)
+							core_exitError 1 "Unknown mergeStrategy '$mergeStrategy' for $combinedFolderPath"
+						;;
+		
+					esac
+					
+					if $deleteWhenFinished; then
+						rm -rf "$combinedFolderPath"
+					fi
+					
+				done <"$combineFilePath"
+				
+			done
+			set -f
+			
+			rm -rf "$initramfsContentsFolderPath"/etc/combine.d
+		}
+		
+		build_needs chmod
+		_libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategy_nocombine()
+		{
+			local individualFilePath
+			set +f
+			for individualFilePath in "$combinedFolderPath"/*."$fileName"
+			do
+				set -f
+				
+				if [ ! -f "$individualFilePath" ]; then
+					continue
+				fi
+	
+				chmod "$permissions" "$individualFilePath"
+			done
+			set -f
+		}
+		
+		build_needs chmod head sort cp
+		_libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategy_group()
+		{
+			local combinedFilePath="$parentFolderPath"/"$fileName"
+			
+			local TMP_FILE
+			core_temporaryFiles_newFileToRemoveOnExit
+			local temporaryFilePath="$TMP_FILE"
+	
+			printf '' >"$temporaryFilePath"
+	
+			local groupFilePath
+			set +f
+			for groupFilePath in "$combinedFolderPath"/*."$fileName".d
+			do
+				set -f
+				if [ ! -f "$groupFilePath" ]; then
+					continue
+				fi
+				if [ ! -s "$groupFilePath" ]; then
+					continue
+				fi
+		
+				local groupWithoutExtensionPath="${groupFilePath%*.${fileName}.d}"
+				local groupName="${groupWithoutExtensionPath##*/}"
+		
+				local groupIdFilePath="$groupFilePath"/id
+		
+				if [ ! -f "$groupIdFilePath" ]; then
+					continue
+				fi
+				if [ ! -s "$groupIdFilePath" ]; then
+					continue
+				fi
+				local groupId="$(head -n 1 "$groupIdFilePath")"
+						
+				local users=''
+				local userFilePath
+				set +f
+				for userFilePath in "$groupFilePath".d/*.user
+				do
+					set -f
+					if [ ! -f "$userFilePath" ]; then
+						continue
+					fi
+					if [ ! -s "$userFilePath" ]; then
+						continue
+					fi
+		
+					local userWithoutExtensionPath="${userFilePath%*.user}"
+					local userName="${userWithoutExtensionPathh##*/}"
+			
+					if [ -n "$users" ]; then
+						users="${users},"
+					fi
+					users="${users}${userName}"
+				done
+				set -f
+		
+				printf '%s:x:%s:%s\n' "$groupName" "$groupId" "$users" >>"$temporaryFilePath"
+			done
+
+			# Create file
+			sort -u -t : -k 3 "$temporaryFilePath" >"$combinedFilePath"
+	
+			# Create backup file
+			local backupFilePath="$combinedFilePath"-
+			cp -f "$combinedFilePath" "$backupFilePath"
+			chmod "$permissions" "$backupFilePath"
+	
+			# Finish
+			chmod "$permissions" "$combinedFilePath"
+		}
+		
+		build_needs sort cp chmod
+		_libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost_action_passwd()
+		{
+			# Create file
+			sort -u -t : -k 3 "$temporaryFilePath" >"$combinedFilePath"
+	
+			# Create backup file
+			local backupFilePath="$combinedFilePath"-
+			cp -f "$combinedFilePath" "$backupFilePath"
+			chmod "$permissions" "$backupFilePath"
+		}
+		
+		build_needs sort cp chmod
+		_libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost_action_shadow()
+		{
+			# Create file
+			sort -u "$temporaryFilePath" >"$combinedFilePath"
+	
+			# Create backup file
+			local backupFilePath="$combinedFilePath"-
+			cp -f "$combinedFilePath" "$backupFilePath"
+			chmod "$permissions" "$backupFilePath"
+		}
+		
+		build_needs sort
+		_libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost_action_default()
+		{
+			# We should really normalise whitespace and merge lines before doing this
+			# Hard task to merge IPv6 lines as they have multiple naming choices
+			sort -u "$temporaryFilePath" >"$combinedFilePath"
+		}
+		
+		build_needs sort
+		_libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost_action_hasfiles()
+		{
+			if $hasFiles; then
+				sort -u "$temporaryFilePath" >"$combinedFilePath"
+			fi
+		}
+
+		build_needs cp
+		_libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost_action_nosort()
+		{
+			cp "$temporaryFilePath" "$combinedFilePath"
+		}
+		
+		build_needs chmod sed
+		_libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost()
+		{
+			local actionToTake="$1"
+	
+			local combinedFilePath="$parentFolderPath"/"$fileName"
+			
+			local TMP_FILE
+			core_temporaryFiles_newFileToRemoveOnExit
+			local temporaryFilePath="$TMP_FILE"
+	
+			printf '' >"$temporaryFilePath"
+			chmod "$permissions" "$temporaryFilePath"
+	
+			local hasFiles=false
+			local individualFilePath
+			set +f
+			for individualFilePath in "$combinedFolderPath"/*."$fileName"
+			do
+				set -f
+				if [ ! -f "$individualFilePath" ]; then
+					continue
+				fi
+		
+				chmod "$permissions" "$individualFilePath"
+		
+				# Remove comments and empty lines and append to a temporary file
+				sed -e '/^#/d' -e '/^$/d' "$individualFilePath" >>"$temporaryFilePath"
+				hasFiles=true
+			done
+			set -f
+	
+			$actionToTake
+
+			chmod "$permissions" "$combinedFilePath"
+		}
+		
+		build_needs readlink
+		_libertine_compile_linux_initramfs_symbolicLinkValue()
+		{
+			local path="$1"
+			
+			readlink "$path"
+		}
+
+		build_needs stat
+		_libertine_compile_linux_initramfs_octalMode()
+		{
+			local path="$1"
+	
+			if [ -L "$path" ]; then
+				printf '0755'
+				return 0
+			fi
+	
+			local octalMode="$(stat -c '%a' "$path")"
+			if [ ${#octalMode} -eq 3 ]; then
+				octalMode='0'"${octalMode}"
+			fi
+	
+			printf '%s' "$octalMode"
+		}
+
+		build_needs stat
+		_libertine_compile_linux_initramfs_deviceMajorAndMinor()
+		{
+			local path="$1"
+			
+			stat -c '%T %t' "$path"
+		}
+		
+		build_needs cat chmod env sh cp
+		_libertine_compile_linux_replaceInstallShForIncreasedReproducibility()
+		{
+			local fileToChange="$inputPath"/arch/"$libertine_buildLinux"/boot/install.sh
+			local envShaBang="$(libertine_public_PATH)"/env
+			{
+				printf '%s\n' "$envShaBang"
+				cat <<-'EOF'
+					main()
+					{
+						local kernelVersion="$1"
+						local kernelImageFile="$2"
+						local kernelMapFile="$3"
+						local defaultInstallPathOrBlankIfRootDirectory="$4"
+						
+						cp "$kernelImageFile" "$defaultInstallPathOrBlankIfRootDirectory"/vmlinuz
+						cp "$kernelMapFile" "$defaultInstallPathOrBlankIfRootDirectory"/System.map
+						printf '%s' "$kernelVersion" >"$defaultInstallPathOrBlankIfRootDirectory"/version
+					}
+					
+					main "$@"
+				EOF
+				
+			} >"$fileToChange"
+			
+			chmod +x "$fileToChange"
+		}
+		
+	;;
+	
+esac
+
+_libertine_compile_linux_menuconfigAdjustments()
+{
+	local configFilePath="$1"
+	local initramFsGenerateFilePath="$2"
+	
+	libertine_public_menuconfig_adjust CONFIG_INITRAMFS_SOURCE "$initramFsGenerateFilePath" true "$configFilePath"
+}
+
+build_needs sed
+_libertine_compile_linux_make()
+{
+	local makeFolderPath="$1"
+	shift 1
+	
+	pushd "$makeFolderPath"
+
+		_libertine_compile_linux_fixHarcodedGccReferencesAndIntroduceCcache()
+		{
+			# We do this because linux doesn't propagate HOSTCC correctly, and is hardcoded to look for 'gcc'
+			#libertine_public_addOrReplaceBinaryInPath gcc "$libertine_paths"/build/"$libertine_build"-gcc
+		
+			# HOSTCC is hardcoded to gcc
+			sed -i -e 's/= gcc/= ccache '${libertine_build}'-cc/g' "$(libertine_public_sourcePath)"/Makefile
+	
+			# Likewise HOSTCXX
+			sed -i -e 's/= g\+\+/= ccache '${libertine_build}'-c++/g' "$(libertine_public_sourcePath)"/Makefile
+	
+			# CC is hardcoded to $(CROSS_COMPILE)gcc
+			sed -i -e 's/$(CROSS_COMPILE)gcc/ccache $(CROSS_COMPILE)cc/g' "$(libertine_public_sourcePath)"/Makefile
+		}
+		_libertine_compile_linux_fixHarcodedGccReferencesAndIntroduceCcache
+	
+		libertine_public_make V=1 \
+			ARCH="$libertine_hostLinuxSpecific" \
+			KBUILD_BUILD_TIMESTAMP="Thu Jun 16 09:22:17 UTC 2016" \
+			KBUILD_BUILD_USER='libertine' \
+			KBUILD_BUILD_HOST='libertine' \
+			CROSS_COMPILE="$libertine_host"- \
+			HOSTCFLAGS="-Wall -Wmissing-prototypes -Wstrict-prototypes -O0 -fomit-frame-pointer -std=gnu89 -I$(libertine_public_outputBuildSysrootPath build_zlib)/usr/include -L$(libertine_public_outputBuildSysrootPath build_zlib)/usr/lib -I$(libertine_public_outputBuildSysrootPath build_libressl)/usr/include -L$(libertine_public_outputBuildSysrootPath build_libressl)/usr/lib -lz" \
+			"$@"
+		
+	popd
+}
