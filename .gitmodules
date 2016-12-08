@@ -1,5 +1,5 @@
 [submodule "upstream"]
-	path = upstream
+	path = fork
 	url = https://github.com/libertine-linux-forks/linux-stable.git
 	branch = libertine
 [submodule "spl_upstream"]
