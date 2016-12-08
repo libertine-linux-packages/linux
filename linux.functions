@@ -2,17 +2,30 @@
 # Copyright © 2016 The developers of libertine linux's package linux. See the COPYRIGHT file in the top-level directory of this distribution and at https://raw.githubusercontent.com/libertine-linux-packages/linux/master/COPYRIGHT.
 
 
-variant=fork
-
-depends build_gnumake
-build_needs make
-
-depends build_ccache
-build_needs ccache
-
 case "$package" in
 	
+	build_musl_cross_make_linux)
+		
+		variant=empty
+		
+		copy_subset="$variant"
+		
+		libertine_compile_build_musl_cross_make_linux()
+		{
+			:
+		}
+		
+	;;
+	
 	linux_prep|linux)
+	
+		variant=fork
+		
+		depends build_gnumake
+		build_needs make
+
+		depends build_ccache
+		build_needs ccache
 		
 		depends build_bash
 		build_needs bash
@@ -54,21 +67,56 @@ case "$package" in
 		build_needs clibtool-static libtoolize
 		
 		build_needs autoreconf autoconf autoheader automake aclocal expr autom4te m4 install sort ls sleep
+
+		_libertine_compile_linux_menuconfigAdjustments()
+		{
+			local configFilePath="$1"
+			local initramFsGenerateFilePath="$2"
+	
+			libertine_public_menuconfig_adjust CONFIG_INITRAMFS_SOURCE "$initramFsGenerateFilePath" true "$configFilePath"
+		}
+
+		build_needs sed
+		_libertine_compile_linux_make()
+		{
+			local makeFolderPath="$1"
+			shift 1
+	
+			pushd "$makeFolderPath"
+
+				_libertine_compile_linux_fixHarcodedGccReferencesAndIntroduceCcache()
+				{
+					# We do this because linux doesn't propagate HOSTCC correctly, and is hardcoded to look for 'gcc'
+					#libertine_public_addOrReplaceBinaryInPath gcc "$libertine_paths"/build/"$libertine_build"-gcc
+		
+					# HOSTCC is hardcoded to gcc
+					sed -i -e 's/= gcc/= ccache '${libertine_build}'-cc/g' "$(libertine_public_sourcePath)"/Makefile
+	
+					# Likewise HOSTCXX
+					sed -i -e 's/= g\+\+/= ccache '${libertine_build}'-c++/g' "$(libertine_public_sourcePath)"/Makefile
+	
+					# CC is hardcoded to $(CROSS_COMPILE)gcc
+					sed -i -e 's/$(CROSS_COMPILE)gcc/ccache $(CROSS_COMPILE)cc/g' "$(libertine_public_sourcePath)"/Makefile
+				}
+				_libertine_compile_linux_fixHarcodedGccReferencesAndIntroduceCcache
+	
+				libertine_public_make V=1 \
+					ARCH="$libertine_hostLinuxSpecific" \
+					KBUILD_BUILD_TIMESTAMP="Thu Jun 16 09:22:17 UTC 2016" \
+					KBUILD_BUILD_USER='libertine' \
+					KBUILD_BUILD_HOST='libertine' \
+					CROSS_COMPILE="$libertine_host"- \
+					HOSTCFLAGS="-Wall -Wmissing-prototypes -Wstrict-prototypes -O0 -fomit-frame-pointer -std=gnu89 -I$(libertine_public_outputBuildSysrootPath build_zlib)/usr/include -L$(libertine_public_outputBuildSysrootPath build_zlib)/usr/lib -I$(libertine_public_outputBuildSysrootPath build_libressl)/usr/include -L$(libertine_public_outputBuildSysrootPath build_libressl)/usr/lib -lz" \
+					"$@"
+		
+			popd
+		}
 	;;
 	
 esac
 
 case "$package" in
-	
-	build_musl_cross_make_linux)
 		
-		libertine_compile_build_musl_cross_make_linux()
-		{
-			:
-		}
-		
-	;;
-	
 	linux_prep)
 				
 		build_needs rm ln
@@ -738,47 +786,3 @@ case "$package" in
 	;;
 	
 esac
-
-_libertine_compile_linux_menuconfigAdjustments()
-{
-	local configFilePath="$1"
-	local initramFsGenerateFilePath="$2"
-	
-	libertine_public_menuconfig_adjust CONFIG_INITRAMFS_SOURCE "$initramFsGenerateFilePath" true "$configFilePath"
-}
-
-build_needs sed
-_libertine_compile_linux_make()
-{
-	local makeFolderPath="$1"
-	shift 1
-	
-	pushd "$makeFolderPath"
-
-		_libertine_compile_linux_fixHarcodedGccReferencesAndIntroduceCcache()
-		{
-			# We do this because linux doesn't propagate HOSTCC correctly, and is hardcoded to look for 'gcc'
-			#libertine_public_addOrReplaceBinaryInPath gcc "$libertine_paths"/build/"$libertine_build"-gcc
-		
-			# HOSTCC is hardcoded to gcc
-			sed -i -e 's/= gcc/= ccache '${libertine_build}'-cc/g' "$(libertine_public_sourcePath)"/Makefile
-	
-			# Likewise HOSTCXX
-			sed -i -e 's/= g\+\+/= ccache '${libertine_build}'-c++/g' "$(libertine_public_sourcePath)"/Makefile
-	
-			# CC is hardcoded to $(CROSS_COMPILE)gcc
-			sed -i -e 's/$(CROSS_COMPILE)gcc/ccache $(CROSS_COMPILE)cc/g' "$(libertine_public_sourcePath)"/Makefile
-		}
-		_libertine_compile_linux_fixHarcodedGccReferencesAndIntroduceCcache
-	
-		libertine_public_make V=1 \
-			ARCH="$libertine_hostLinuxSpecific" \
-			KBUILD_BUILD_TIMESTAMP="Thu Jun 16 09:22:17 UTC 2016" \
-			KBUILD_BUILD_USER='libertine' \
-			KBUILD_BUILD_HOST='libertine' \
-			CROSS_COMPILE="$libertine_host"- \
-			HOSTCFLAGS="-Wall -Wmissing-prototypes -Wstrict-prototypes -O0 -fomit-frame-pointer -std=gnu89 -I$(libertine_public_outputBuildSysrootPath build_zlib)/usr/include -L$(libertine_public_outputBuildSysrootPath build_zlib)/usr/lib -I$(libertine_public_outputBuildSysrootPath build_libressl)/usr/include -L$(libertine_public_outputBuildSysrootPath build_libressl)/usr/lib -lz" \
-			"$@"
-		
-	popd
-}
