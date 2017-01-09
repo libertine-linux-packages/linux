@@ -115,22 +115,25 @@ case "$package" in
 			_libertine_compile_linux_menuconfigAdjustments "$configFilePath" "$(libertine_public_outputInitramfsContentsFilePath)"
 			
 			_libertine_compile_linux_prep_menuconfigAlterationsBeforeNonKernelSuppliedModules "$configFilePath"
-			
+						
 			# Fix-up grecurity plugin compilation for cross-compiling
 			_libertine_compile_linux_prep_fixGrsecurityGccPluginsForCrossCompilation
+			
+			# Linux's Makefile and other tools assume /bin/bash
+			_libertine_compile_linux_prep_fixHardcodedBashReferencesInMakefileAndElsewhere "$(libertine_public_sourcePath)"
 			
 			# Linux's Makefile hardcodes gcc and g++ rather than cc and c++
 			_libertine_compile_linux_prep_fixHardcodedGccReferencesInMakefile
 			
 			# grsecurity relies on include/generated/autoconf.h. Running this make task should create it
-			_libertine_compile_linux_make "$(libertine_public_sourcePath)" make silentoldconfig
+			_libertine_compile_linux_make "$(libertine_public_sourcePath)" silentoldconfig
 			
 			# Prepare for, and then build, extra modules
 			_libertine_compile_linux_make "$(libertine_public_sourcePath)" prepare scripts
 			
 			if $linux_prep_enableZfs; then
-				_libertine_compile_linux_prep_nonKernelSuppliedModuleSpl
-				_libertine_compile_linux_prep_nonKernelSuppliedModuleZfs
+				_libertine_compile_linux_prep_nonKernelSuppliedModule_spl
+				_libertine_compile_linux_prep_nonKernelSuppliedModule_zfs
 				_libertine_compile_linux_prep_menuconfigAlterationsForZfsAfterNonKernelSuppliedModules "$configFilePath"
 			fi
 			
@@ -138,6 +141,19 @@ case "$package" in
 	
 			rm -rf "$(libertine_public_outputMiscPath)"
 			ln -s copy/"$variant" "$(libertine_public_outputMiscPath)"
+		}
+
+		build_needs find xargs sed
+		_libertine_compile_linux_prep_fixHardcodedBashReferencesInMakefileAndElsewhere()
+		{
+			local path="$1"
+			
+			local buildBashPath="$(libertine_public_buildNeedsPath)"/bash
+			
+			# NOTE: This logic isn't perfect
+			pushd "$path"
+				find . -type f | xargs sed -i -e 's;/bin/bash;'"$buildBashPath"';g'
+			popd
 		}
 
 		build_needs id
@@ -197,13 +213,25 @@ case "$package" in
 				-e 's/$(CROSS_COMPILE)gcc/$(CROSS_COMPILE)cc/g' \
 				"$(libertine_public_sourcePath)"/Makefile
 		}
+
+		build_needs sed
+		_libertine_compile_linux_prep_nonKernelSuppliedModule_fixesForThingsThatAssumeGnuCoreutilsAndNotBusyBox()
+		{
+			# Not an exact match, but good enough
+			sed -i -e 's/--canonicalize-existing/-f/g' copy-builtin
+			
+			# Naive
+			sed -i -e 's/--recursive/-r/g' copy-builtin
+		}
 		
 		build_needs sed rm cp
-		_libertine_compile_linux_prep_nonKernelSuppliedModuleSpl()
+		_libertine_compile_linux_prep_nonKernelSuppliedModule_spl()
 		{
 			pushd "$(libertine_public_packagePath)"/spl_upstream
 				
-				_libertine_compile_linux_prep_fixForBusybox
+				_libertine_compile_linux_prep_nonKernelSuppliedModule_fixesForThingsThatAssumeGnuCoreutilsAndNotBusyBox
+				
+				_libertine_compile_linux_prep_fixHardcodedBashReferencesInMakefileAndElsewhere "$(libertine_public_packagePath)"/spl_upstream
 				
 				# Remove stuff that (a) requires fixes and (b) slows down the build
 				local tab=$"\t"
@@ -241,14 +269,16 @@ case "$package" in
 		}
 		
 		build_needs sed truncate mktemp dd
-		_libertine_compile_linux_prep_nonKernelSuppliedModuleZfs()
+		_libertine_compile_linux_prep_nonKernelSuppliedModule_zfs()
 		{
 			libertine_public_populateInputSysroot zlib libuuid libtirpc libblkid
 	
 			pushd "$(libertine_public_packagePath)"/zfs_upstream
-		
-				_libertine_compile_linux_prep_fixForBusybox
+			
+				_libertine_compile_linux_prep_nonKernelSuppliedModule_fixesForThingsThatAssumeGnuCoreutilsAndNotBusyBox
 				
+				_libertine_compile_linux_prep_fixHardcodedBashReferencesInMakefileAndElsewhere "$(libertine_public_packagePath)"/zfs_upstream
+			
 				# Remove stuff that (a) requires even more build binaries and (b) slows down the build
 				local tab=$"\t"
 				sed -i -e "s/SUBDIRS += udev etc man scripts tests lib cmd contrib/SUBDIRS += scripts lib cmd/g" -e "/rpm.am/d" -e "/deb.am/d" -e "/tgz.am/d" Makefile.am
@@ -294,26 +324,6 @@ case "$package" in
 		{
 			libertine_public_menuconfig_adjust CONFIG_SPL y false "$configFilePath"
 			libertine_public_menuconfig_adjust CONFIG_ZFS y false "$configFilePath"
-		}
-
-		build_needs find xargs grep awk sed
-		_libertine_compile_linux_prep_fixForBusybox()
-		{
-			# Not an exact match, but good enough
-			sed -i -e 's/--canonicalize-existing/-f/g' copy-builtin
-			
-			# Naive
-			sed -i -e 's/--recursive/-r/g' copy-builtin
-
-			local buildBashPath="$(libertine_public_buildNeedsPath)"/bash
-	
-			# Fix may not be 100% OK, but here we go...
-			find . -type f | xargs grep '#!/bin/bash' | awk -F: '{print $1}' | xargs -r sed -i -e 's;#!/bin/bash;#!'"$buildBashPath"';g'
-			find . -type f | xargs grep 'SHELL := /bin/bash' | awk -F: '{print $1}' | xargs -r sed -i -e 's;SHELL := /bin/bash;SHELL := '"$buildBashPath"';g'
-			find . -type f | xargs grep '$(shell /bin/bash ' | awk -F: '{print $1}' | xargs -r sed -i -e 's;$(shell /bin/bash ;$(shell '"$buildBashPath"' ;g'
-	
-			# Only in Makefile
-			find . -type f | xargs grep 'if [ -x /bin/bash ]; then echo /bin/bash' | awk -F: '{print $1}' | xargs -r sed -i -e 's,if [ -x /bin/bash ]; then echo /bin/bash,if true; then echo '"$buildBashPath"',g'
 		}
 	;;
 	
