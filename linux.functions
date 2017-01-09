@@ -83,24 +83,9 @@ case "$package" in
 			shift 1
 	
 			pushd "$makeFolderPath"
-
-				_libertine_compile_linux_fixHarcodedGccReferencesAndIntroduceCcache()
-				{
-					# We do this because linux doesn't propagate HOSTCC correctly, and is hardcoded to look for 'gcc'
-					#libertine_public_addOrReplaceBinaryInPath gcc "$libertine_paths"/build/"$libertine_build"-gcc
-		
-					# HOSTCC is hardcoded to gcc
-					sed -i -e 's/= gcc/= ccache '${libertine_build}'-cc/g' "$(libertine_public_sourcePath)"/Makefile
 	
-					# Likewise HOSTCXX
-					sed -i -e 's/= g\+\+/= ccache '${libertine_build}'-c++/g' "$(libertine_public_sourcePath)"/Makefile
-	
-					# CC is hardcoded to $(CROSS_COMPILE)gcc
-					sed -i -e 's/$(CROSS_COMPILE)gcc/ccache $(CROSS_COMPILE)cc/g' "$(libertine_public_sourcePath)"/Makefile
-				}
-				_libertine_compile_linux_fixHarcodedGccReferencesAndIntroduceCcache
-	
-				libertine_public_make V=1 \
+				libertine_public_make \
+					V=2 \
 					ARCH="$libertine_hostLinuxSpecific" \
 					KBUILD_BUILD_TIMESTAMP="Thu Jun 16 09:22:17 UTC 2016" \
 					KBUILD_BUILD_USER='libertine' \
@@ -131,6 +116,15 @@ case "$package" in
 			
 			_libertine_compile_linux_prep_menuconfigAlterationsBeforeNonKernelSuppliedModules "$configFilePath"
 			
+			# Fix-up grecurity plugin compilation for cross-compiling
+			_libertine_compile_linux_prep_fixGrsecurityGccPluginsForCrossCompilation
+			
+			# Linux's Makefile hardcodes gcc and g++ rather than cc and c++
+			_libertine_compile_linux_prep_fixHardcodedGccReferencesInMakefile
+			
+			# grsecurity relies on include/generated/autoconf.h. Running this make task should create it
+			_libertine_compile_linux_make "$(libertine_public_sourcePath)" make silentoldconfig
+			
 			# Prepare for, and then build, extra modules
 			_libertine_compile_linux_make "$(libertine_public_sourcePath)" prepare scripts
 			
@@ -144,6 +138,64 @@ case "$package" in
 	
 			rm -rf "$(libertine_public_outputMiscPath)"
 			ln -s copy/"$variant" "$(libertine_public_outputMiscPath)"
+		}
+
+		build_needs id
+		_libertine_compile_linux_prep_menuconfigAlterationsBeforeNonKernelSuppliedModules()
+		{
+			local configFilePath="$1"
+	
+			libertine_public_menuconfig_adjust CONFIG_CROSS_COMPILE "$libertine_host"- true "$configFilePath"
+			libertine_public_menuconfig_adjust CONFIG_INITRAMFS_ROOT_UID "$(id -u)" false "$configFilePath"
+			libertine_public_menuconfig_adjust CONFIG_INITRAMFS_ROOT_GID "$(id -g)" false "$configFilePath"
+		}
+		
+		build_needs sed cat
+		_libertine_compile_linux_prep_fixGrsecurityGccPluginsForCrossCompilation()
+		{
+			# Note this does not fix the problem that system.h (in plugin/include) requires gmp.h
+			# The bug here is that scripts/Makefile.gcc-plugins passes '$(CC)' instead of HOSTCC / HOSTCXX to find the plugin dir
+			# We always know tha answer is HOSTCXX - $2
+			cat <<-'EOF' >"$(libertine_public_sourcePath)"/scripts/gcc-plugin.sh
+				echo "$2"
+			EOF
+			
+			# Fix to change from $(CC) to $(HOSTCXX) to find plugin dir
+			sed -i -e 's/GCCPLUGINS_DIR := \$(shell \$(CC)/GCCPLUGINS_DIR := $(shell $(HOSTCXX)/g' "$(libertine_public_sourcePath)"/tools/gcc/Makefile
+						
+			# Add -I, -L, -l for gmp, mpc
+			local buildFolderPath="$(libertine_public_packagePath build_musl_cross_make_build)"/upstream/build
+			local objToolchainFolderPath="$buildFolderPath"/obj_toolchain
+
+			local gmpIncludePath="$objToolchainFolderPath"/gmp
+			local gmpLibraryPath="$objToolchainFolderPath"/gmp/.libs
+			
+			local mpcIncludePath="$buildFolderPath"/src_mpc/src
+			local mpcLibraryPath="$objToolchainFolderPath"/.libs
+			
+			local mpfrIncludePath="$buildFolderPath"/src_mpfr/src
+			local mpfrLibraryPath="$objToolchainFolderPath"/mpfr/src/.libs
+			
+			sed -i \
+				-e 's,HOST_EXTRACXXFLAGS +=,HOST_EXTRACXXFLAGS += -I'"$gmpIncludePath"' -L'"$gmpLibraryPath"' -I'"$mpcIncludePath"' -I'"$mpcLibraryPath"' -I'"$mpfrIncludePath"' -I'"$mpfrLibraryPath"',g' \
+				"$(libertine_public_sourcePath)"/tools/gcc/Makefile
+			
+			sed -i \
+				-e 's/-shared/-shared -static-libstdc++/g' \
+				"$(libertine_public_sourcePath)"/scripts/Makefile.host
+		}
+
+		build_needs sed
+		_libertine_compile_linux_prep_fixHardcodedGccReferencesInMakefile()
+		{
+			# (1) HOSTCC is hardcoded to gcc
+			# (2) HOSTCXX is hardcoded to g++
+			# (3) CC is hardcoded to $(CROSS_COMPILE)gcc
+			sed -i \
+				-e 's/^HOSTCC[[:space:]]*= gcc/HOSTCC = '"${libertine_build}"'-cc/g' \
+				-e 's/^HOSTCXX[[:space:]]*= g++/HOSTCXX = '"${libertine_build}"'-c++/g' \
+				-e 's/$(CROSS_COMPILE)gcc/$(CROSS_COMPILE)cc/g' \
+				"$(libertine_public_sourcePath)"/Makefile
 		}
 		
 		build_needs sed rm cp
@@ -166,7 +218,7 @@ case "$package" in
 				cp -a -f -H build-aux/. config/
 				
 				# We do this as SPL looks for a hardcoded 'cpp'
-				libertine_public_addOrReplaceBinaryInPath cpp "$libertine_paths"/build/"$libertine_build"-cpp
+				libertine_public_addOrReplaceBinaryInPath cpp "$libertine_build"-cpp
 				
 				libertine_public_autoconf_removeCFlags='-ffunction-sections -fdata-sections -Wl,--gc-sections' libertine_public_autoconf_modernAutoconfConfigure \
 					--disable-debug-kmem \
@@ -210,7 +262,7 @@ case "$package" in
 				cp -a -f -H build-aux/. config/
 		
 				# We do this as ZFS looks for a hardcoded 'cpp'
-				libertine_public_addOrReplaceBinaryInPath cpp "$libertine_paths"/build/"$libertine_build"-cpp
+				libertine_public_addOrReplaceBinaryInPath cpp "$libertine_build"-cpp
 				
 				libertine_public_autoconf_removeCFlags='-ffunction-sections -fdata-sections -Wl,--gc-sections -fno-common' libertine_public_autoconf_modernAutoconfConfigure \
 					--disable-debug-dmu-tx \
@@ -238,16 +290,6 @@ case "$package" in
 			libertine_public_installAndStripBinariesIn sbin mount.zfs zdb zed zfs zhack zinject zpios zpool zstreamdump ztest
 		}
 
-		build_needs id
-		_libertine_compile_linux_prep_menuconfigAlterationsBeforeNonKernelSuppliedModules()
-		{
-			local configFilePath="$1"
-	
-			libertine_public_menuconfig_adjust CONFIG_CROSS_COMPILE "$libertine_host"- true "$configFilePath"
-			libertine_public_menuconfig_adjust CONFIG_INITRAMFS_ROOT_UID "$(id -u)" false "$configFilePath"
-			libertine_public_menuconfig_adjust CONFIG_INITRAMFS_ROOT_GID "$(id -g)" false "$configFilePath"
-		}
-
 		_libertine_compile_linux_prep_menuconfigAlterationsForZfsAfterNonKernelSuppliedModules()
 		{
 			libertine_public_menuconfig_adjust CONFIG_SPL y false "$configFilePath"
@@ -263,7 +305,7 @@ case "$package" in
 			# Naive
 			sed -i -e 's/--recursive/-r/g' copy-builtin
 
-			local buildBashPath="$(libertine_public_PATH)"/bash
+			local buildBashPath="$(libertine_public_buildNeedsPath)"/bash
 	
 			# Fix may not be 100% OK, but here we go...
 			find . -type f | xargs grep '#!/bin/bash' | awk -F: '{print $1}' | xargs -r sed -i -e 's;#!/bin/bash;#!'"$buildBashPath"';g'
@@ -759,7 +801,7 @@ case "$package" in
 		_libertine_compile_linux_replaceInstallShForIncreasedReproducibility()
 		{
 			local fileToChange="$inputPath"/arch/"$libertine_buildLinux"/boot/install.sh
-			local envShaBang="$(libertine_public_PATH)"/env
+			local envShaBang="$(libertine_public_buildNeedsPath)"/env
 			{
 				printf '%s\n' "$envShaBang"
 				cat <<-'EOF'
