@@ -151,9 +151,16 @@ case "$package" in
 			local buildBashPath="$(libertine_public_buildNeedsPath)"/bash
 			
 			# NOTE: This logic isn't perfect
-			pushd "$path"
-				find . -type f | xargs sed -i -e 's;/bin/bash;'"$buildBashPath"';g'
-			popd
+			echo 1>&2
+			echo 1>&2
+			echo "FIXME" 1>&2
+			echo "$path" 1>&2
+			find . -type f 1>&2
+			echo EXIT 1>&2
+			exit 99
+			# pushd "$path"
+			# 	find . -type f | xargs sed -i -e 's;/bin/bash;'"$buildBashPath"';g'
+			# popd
 		}
 
 		build_needs id
