@@ -37,16 +37,17 @@ case "$package" in
 		build_needs perl
 		
 		depends build_musl_cross_make_build
-		build_needs "$libertine_build"-cc "$libertine_build"-gcc "$libertine_build"-c++ "$libertine_build"-g++ "$libertine_build"-ar "$libertine_build"-ld "$libertine_build"-ranlib
+		build_needs "$libertine_build"-cpp "$libertine_build"-cc "$libertine_build"-gcc "$libertine_build"-c++ "$libertine_build"-g++ "$libertine_build"-ar "$libertine_build"-ld "$libertine_build"-ranlib
 		
 		depends build_musl_cross_make_host
-		build_needs "$libertine_host"-cc "$libertine_host"-gcc "$libertine_host"-ar "$libertine_host"-ld "$libertine_host"-ranlib "$libertine_host"-strip "$libertine_host"-nm "$libertine_host"-objcopy "$libertine_host"-objdump
+		build_needs "$libertine_host"-cpp "$libertine_host"-cc "$libertine_host"-gcc "$libertine_host"-ar "$libertine_host"-ld "$libertine_host"-ranlib "$libertine_host"-strip "$libertine_host"-nm "$libertine_host"-objcopy "$libertine_host"-objdump
 		
 		depends build_bc
 		build_needs bc
 		
 		depends build_busybox
-		build_needs cmp tail bzip2 od cut touch xargs echo sort uniq mktemp dirname basename install sed gzip date head fgrep readlink expr wc uname
+		build_needs cmp tail bzip2 od cut touch xargs echo sort uniq mktemp dirname basename install sed gzip date head fgrep readlink expr wc uname seq
+		# seq is needed by grsecurity's generate_size_overflow_hash.sh
 
 		# Needs the 'full' xz, not BusyBox's
 		depends build_xz_utils_xz
@@ -106,7 +107,7 @@ case "$package" in
 				
 		build_needs rm ln
 		libertine_compile_linux_prep()
-		{	
+		{
 			# Empty CPIO archive input file
 			printf '' >"$(libertine_public_outputInitramfsContentsFilePath)"
 			
@@ -132,9 +133,16 @@ case "$package" in
 			_libertine_compile_linux_make "$(libertine_public_sourcePath)" prepare scripts
 			
 			if $linux_prep_enableZfs; then
+
+				# We do this as SPL and ZFS both look for a hardcoded 'cpp'
+				libertine_public_addOrReplaceBinaryInPath cpp "$libertine_build"-cpp
+
 				_libertine_compile_linux_prep_nonKernelSuppliedModule_spl
+
 				_libertine_compile_linux_prep_nonKernelSuppliedModule_zfs
+
 				_libertine_compile_linux_prep_menuconfigAlterationsForZfsAfterNonKernelSuppliedModules "$configFilePath"
+
 			fi
 			
 			_libertine_compile_linux_make "$(libertine_public_sourcePath)"
@@ -150,17 +158,9 @@ case "$package" in
 			
 			local buildBashPath="$(libertine_public_buildNeedsPath)"/bash
 			
-			# NOTE: This logic isn't perfect
-			echo 1>&2
-			echo 1>&2
-			echo "FIXME" 1>&2
-			echo "$path" 1>&2
-			find . -type f 1>&2
-			echo EXIT 1>&2
-			exit 99
-			# pushd "$path"
-			# 	find . -type f | xargs sed -i -e 's;/bin/bash;'"$buildBashPath"';g'
-			# popd
+			libertine_public_adjustShaBangAllFilesInPathEvenIfNotFirstLine "$path"
+			
+			find "$path" -type f -name 'Makefile*' | xargs sed -i 's;/bin/bash;'"$buildBashPath"';g'
 		}
 
 		build_needs id
@@ -176,17 +176,13 @@ case "$package" in
 		build_needs sed cat
 		_libertine_compile_linux_prep_fixGrsecurityGccPluginsForCrossCompilation()
 		{
-			# Note this does not fix the problem that system.h (in plugin/include) requires gmp.h
-			# The bug here is that scripts/Makefile.gcc-plugins passes '$(CC)' instead of HOSTCC / HOSTCXX to find the plugin dir
-			# We always know tha answer is HOSTCXX - $2
+			# Note this does not fix the problem that system.h (in plugin/include) requires gmp.h or libiberty.h creating a conflicting basename because gcc's auto-host.h is incorrectly generated
 			cat <<-'EOF' >"$(libertine_public_sourcePath)"/scripts/gcc-plugin.sh
-				echo "$2"
+				echo "$3"
 			EOF
 			
-			# Fix to change from $(CC) to $(HOSTCXX) to find plugin dir
-			sed -i -e 's/GCCPLUGINS_DIR := \$(shell \$(CC)/GCCPLUGINS_DIR := $(shell $(HOSTCXX)/g' "$(libertine_public_sourcePath)"/tools/gcc/Makefile
-						
-			# Add -I, -L, -l for gmp, mpc
+			# This is just plain weird - GCC Plugins needs gmp but use the plugin includes of the target.
+			# Add -I, -L for gmp, mpc and mpfr
 			local buildFolderPath="$(libertine_public_packagePath build_musl_cross_make_build)"/upstream/build
 			local objToolchainFolderPath="$buildFolderPath"/obj_toolchain
 
@@ -200,7 +196,7 @@ case "$package" in
 			local mpfrLibraryPath="$objToolchainFolderPath"/mpfr/src/.libs
 			
 			sed -i \
-				-e 's,HOST_EXTRACXXFLAGS +=,HOST_EXTRACXXFLAGS += -I'"$gmpIncludePath"' -L'"$gmpLibraryPath"' -I'"$mpcIncludePath"' -I'"$mpcLibraryPath"' -I'"$mpfrIncludePath"' -I'"$mpfrLibraryPath"',g' \
+				-e 's,HOST_EXTRACXXFLAGS +=,HOST_EXTRACXXFLAGS += -I'"$gmpIncludePath"' -L'"$gmpLibraryPath"' -I'"$mpcIncludePath"' -L'"$mpcLibraryPath"' -I'"$mpfrIncludePath"' -L'"$mpfrLibraryPath"',g' \
 				"$(libertine_public_sourcePath)"/tools/gcc/Makefile
 			
 			sed -i \
@@ -252,22 +248,19 @@ case "$package" in
 				rm -Rf autom4te.cache
 				cp -a -f -H build-aux/. config/
 				
-				# We do this as SPL looks for a hardcoded 'cpp'
-				libertine_public_addOrReplaceBinaryInPath cpp "$libertine_build"-cpp
-				
 				libertine_public_autoconf_removeCFlags='-ffunction-sections -fdata-sections -Wl,--gc-sections' libertine_public_autoconf_modernAutoconfConfigure \
 					--disable-debug-kmem \
 					--disable-debug-kmem-tracking \
 					--enable-linux-builtin=yes \
 					--with-linux="$(libertine_public_sourcePath)" \
 					--with-linux-obj="$(libertine_public_sourcePath)"
-		
+				
 				#typedef ulong_t				pfn_t;
 				sed -i -e '/typedef.*pfn_t;/d' include/sys/types.h
 				
 				# Requires bash. No really.
 				bash ./copy-builtin "$(libertine_public_sourcePath)"
-		
+				
 				libertine_public_make
 		
 				libertine_public_make DESTDIR="$(libertine_public_outputHostSysrootPath)" install
@@ -297,9 +290,6 @@ case "$package" in
 				autoreconf --install --force --verbose || true
 				rm -Rf autom4te.cache
 				cp -a -f -H build-aux/. config/
-		
-				# We do this as ZFS looks for a hardcoded 'cpp'
-				libertine_public_addOrReplaceBinaryInPath cpp "$libertine_build"-cpp
 				
 				libertine_public_autoconf_removeCFlags='-ffunction-sections -fdata-sections -Wl,--gc-sections -fno-common' libertine_public_autoconf_modernAutoconfConfigure \
 					--disable-debug-dmu-tx \
