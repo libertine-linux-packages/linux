@@ -332,6 +332,9 @@ case "$package" in
 	;;
 	
 	linux)
+		
+		copy_subset="empty"
+		
 		depends linux_prep
 		
 		depends build_rsync
