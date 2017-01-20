@@ -133,22 +133,28 @@ case "$package" in
 			_libertine_compile_linux_make "$(libertine_public_sourcePath)" prepare scripts
 			
 			if $linux_prep_enableZfs; then
-
-				# We do this as SPL and ZFS both look for a hardcoded 'cpp'
-				libertine_public_addOrReplaceBinaryInPath cpp "$libertine_build"-cpp
-
-				_libertine_compile_linux_prep_nonKernelSuppliedModule_spl
-
-				_libertine_compile_linux_prep_nonKernelSuppliedModule_zfs
-
-				_libertine_compile_linux_prep_menuconfigAlterationsForZfsAfterNonKernelSuppliedModules "$configFilePath"
-
+				_libertine_compile_linux_prep_nonKernelSuppliedModule_buildSplAndZfs
 			fi
 			
 			_libertine_compile_linux_make "$(libertine_public_sourcePath)"
 	
 			rm -rf "$(libertine_public_outputMiscPath)"
 			ln -s copy/"$variant" "$(libertine_public_outputMiscPath)"
+		}
+		
+		_libertine_compile_linux_prep_nonKernelSuppliedModule_buildSplAndZfs()
+		{
+			printf '\n\n\nZFS does not compile with grsec currently (Jan 20 2017)\n\n\n'
+			return 0
+			
+			# We do this as SPL and ZFS both look for a hardcoded 'cpp'
+			libertine_public_addOrReplaceBinaryInPath cpp "$libertine_build"-cpp
+
+			_libertine_compile_linux_prep_nonKernelSuppliedModule_spl
+
+			_libertine_compile_linux_prep_nonKernelSuppliedModule_zfs
+
+			_libertine_compile_linux_prep_menuconfigAlterationsForZfsAfterNonKernelSuppliedModules "$configFilePath"
 		}
 
 		build_needs find xargs sed
