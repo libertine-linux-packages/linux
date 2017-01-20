@@ -145,7 +145,7 @@ case "$package" in
 		
 		_libertine_compile_linux_prep_nonKernelSuppliedModule_buildSplAndZfs()
 		{
-			printf '\n\n\nZFS does not compile with grsec currently (Jan 20 2017)\n\n\n'
+			printf '\n\n\nZFS does not compile with grsec currently (Jan 20 2017)\n\n\n' 1>&2
 			return 0
 			
 			# We do this as SPL and ZFS both look for a hardcoded 'cpp'
