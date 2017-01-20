@@ -4,3 +4,9 @@
 [submodule "zfs_upstream"]
 	path = zfs_upstream
 	url = https://github.com/zfsonlinux/zfs
+[submodule "upstream"]
+	path = upstream
+	url = https://kernel.googlesource.com/pub/scm/linux/kernel/git/stable/linux-stable.git
+[submodule "linux-patches"]
+	path = linux-patches
+	url = https://github.com/libertine-linux/linux-patches.git
