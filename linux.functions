@@ -414,7 +414,6 @@ case "$package" in
 			_libertine_compile_linux_menuconfigAdjustments "$inputPath"/.config "$outputInitramFsGenerateFilePath"
 			_libertine_compile_linux_menuconfigAlterationsForCmdline "$inputPath"/.config
 			
-			_libertine_compile_linux_initramfs_installMachineFilesystemAsIfItWereOurOwn
 			_libertine_compile_linux_initramfs_createCpioArchiveInputFile "$outputInitramFsGenerateFilePath"
 			
 			_libertine_compile_linux_make "$inputPath"
@@ -437,7 +436,7 @@ case "$package" in
 			set -f
 
 			rm -rf "$initramfsContentsFolderPath"
-			mkdir -m 0755 -p "$initramfsContentsFolderPath"
+			mkdir -m 0700 -p "$initramfsContentsFolderPath"
 			
 			rm -rf "$outputInitramFsGenerateFilePath"
 		}
@@ -501,50 +500,54 @@ case "$package" in
 			fi
 		}
 		
-		_libertine_compile_linux_initramfs_installMachineFilesystemAsIfItWereOurOwn()
+		_libertine_compile_linux_iteratePackages_callback()
 		{
-			if [ -d "$libertine_machineSettingsFolderPath"/initramfs ]; then
-				libertine_public_copy_filesystem "$libertine_machineSettingsFolderPath"/initramfs/ "$(libertine_public_outputInitramfsPath)"/
-			fi
-			local contentsFilePath="$libertine_machineSettingsFolderPath"/initramfs.contents
-			if [ -f "$contentsFilePath" ]; then
-				cp -f "$contentsFilePath" "$(libertine_public_outputInitramfsContentsFilePath)"
-			fi
+			local dependentPackage="$core_variable_array_element"
+			local callback="$1"
+			shift 1
+			
+			case "$dependentPackage" in
+				
+				build_*)
+					:
+				;;
+				
+				*)
+					$callback "$@"
+				;;
+				
+			esac
 		}
 		
-		build_needs rm mkdir tac sort find grep cat
+		_libertine_compile_linux_iteratePackages()
+		{
+			local callback="$1"
+			
+			core_variable_array_iterate _libertine_compile_built _libertine_compile_linux_iteratePackages_callback "$callback"
+			
+			# And ourselves (ie machine filesystem)
+			core_variable_array_element='linux' _libertine_compile_linux_iteratePackages_callback "$callback"
+		}
+		
+		build_needs ln rm mkdir sed tac sort find cat chmod
 		_libertine_compile_linux_initramfs_createCpioArchiveInputFile()
 		{
-			{
-				core_variable_array_iterate _libertine_compile_built _libertine_compile_linux_initramfs_combineInitramfsSysrootContents
-				
-				# And ourselves (ie machine filesystem)
-				core_variable_array_element='linux' _libertine_compile_linux_initramfs_combineInitramfsSysrootContents
-			} | tac | sort -t ' ' -k 2  >"$outputInitramFsGenerateFilePath".duplicates
-
-			printf '\nDONE ADDING PACKAGES TO CPIO\n' 1>&2
+			_libertine_compile_linux_initramfs_installMachineFilesystemAsIfItWereOurOwn
 			
-			{
-				local previousPath=''
-				local kind
-				local path
-				local remainder
-				
-				while IFS=' ' read -r kind path remainder
-				do
-					if [ "$path" = "$previousPath" ]; then
-						prinf '%s\n' "WARNING: Path '$path' is duplicated"
-						continue
-					fi
-					
-					printf '%s %s %s\n' "$kind" "$path" "$remainder"
-					previousPath="$path"
-				
-				done <"$outputInitramFsGenerateFilePath".duplicates
-			} >"$outputInitramFsGenerateFilePath".directories-may-not-be-first.overrides
 			
+			
+			local cpioOutputParentFolderPath="$(libertine_public_outputMiscPath)"/initramfs
+			local cpioOutputRootFolderPath="$cpioOutputParentFolderPath"/root
+			mkdir -m 0755 -p "$cpioOutputRootFolderPath"
+			
+			
+			
+			local generatedPackagesFilePath="$cpioOutputParentFolderPath"/000-generated.initramfs.contents
+			_libertine_compile_linux_iteratePackages _libertine_compile_linux_initramfs_mergeInitramfsSysroots 1>&2
+			chmod 0755 "$cpioOutputRootFolderPath"  # Forces what will become '/' to have correct permissions after rsync merge
+			_libertine_compile_linux_initramfs_combineSnippetsAndRemoveFromInitramfs
 			{
-				pushd "$initramfsContentsFolderPath"
+				pushd "$cpioOutputRootFolderPath"
 			
 					# Setting IFS to . allows us to strip a leading '.' from paths from find
 					# Using -mindepth 1 eliminates './'
@@ -552,53 +555,82 @@ case "$package" in
 					local path
 					find . -mindepth 1 -depth | while IFS='.' read -r empty path
 					do
-						if ! grep -q -F ' '"$path"' ' "$outputInitramFsGenerateFilePath".directories-may-not-be-first.overrides; then
-							local fileEtcPath=."$path"
-							
-							if [ -L "$fileEtcPath" ]; then
-								printf 'slink %s %s %s 0 0\n' "$path" "$(_libertine_compile_linux_initramfs_symbolicLinkValue "$fileEtcPath")" "$(_libertine_compile_linux_initramfs_octalMode "$fileEtcPath")"
-							elif [ -f "$fileEtcPath" ]; then
-								printf 'file %s %s %s 0 0\n' "$path" initramfs"${path}" "$(_libertine_compile_linux_initramfs_octalMode "$fileEtcPath")"
-							elif [ -d "$fileEtcPath" ]; then
-								printf 'dir %s %s 0 0\n' "$path" "$(_libertine_compile_linux_initramfs_octalMode "$fileEtcPath")"
-							elif [ -b "$fileEtcPath" ]; then
-								printf 'nod %s %s 0 0 b %s\n' "$path" "$(_libertine_compile_linux_initramfs_octalMode "$fileEtcPath")" "$(_libertine_compile_linux_initramfs_deviceMajorAndMinor "$fileEtcPath")"
-							elif [ -c "$fileEtcPath" ]; then
-								printf 'nod %s %s 0 0 c %s\n' "$path" "$(_libertine_compile_linux_initramfs_octalMode "$fileEtcPath")" "$(_libertine_compile_linux_initramfs_deviceMajorAndMinor "$fileEtcPath")"
-							elif [ -p "$fileEtcPath" ]; then
-								printf 'pipe %s %s 0 0\n' "$path" "$(_libertine_compile_linux_initramfs_octalMode "$fileEtcPath")"
-							elif [ -S "$fileEtcPath" ]; then
-								core_exitError $core_commandLine_exitCode_CONFIG "Sockets are not acceptable in a rootfs ram disk"
-							else
-								core_exitError $core_commandLine_exitCode_UNAVAILABLE "What is ${fileEtcPath}?"
-							fi
+						local fileEtcPath=."$path"
+						
+						if [ -L "$fileEtcPath" ]; then
+							printf 'slink %s %s %s 0 0\n' "$path" "$(_libertine_compile_linux_initramfs_symbolicLinkValue "$fileEtcPath")" "$(_libertine_compile_linux_initramfs_octalMode "$fileEtcPath")"
+						elif [ -f "$fileEtcPath" ]; then
+							printf 'file %s %s %s 0 0\n' "$path" initramfs"${path}" "$(_libertine_compile_linux_initramfs_octalMode "$fileEtcPath")"
+						elif [ -d "$fileEtcPath" ]; then
+							printf 'dir %s %s 0 0\n' "$path" "$(_libertine_compile_linux_initramfs_octalMode "$fileEtcPath")"
+						elif [ -b "$fileEtcPath" ]; then
+							printf 'nod %s %s 0 0 b %s\n' "$path" "$(_libertine_compile_linux_initramfs_octalMode "$fileEtcPath")" "$(_libertine_compile_linux_initramfs_deviceMajorAndMinor "$fileEtcPath")"
+						elif [ -c "$fileEtcPath" ]; then
+							printf 'nod %s %s 0 0 c %s\n' "$path" "$(_libertine_compile_linux_initramfs_octalMode "$fileEtcPath")" "$(_libertine_compile_linux_initramfs_deviceMajorAndMinor "$fileEtcPath")"
+						elif [ -p "$fileEtcPath" ]; then
+							printf 'pipe %s %s 0 0\n' "$path" "$(_libertine_compile_linux_initramfs_octalMode "$fileEtcPath")"
+						elif [ -S "$fileEtcPath" ]; then
+							core_exitError $core_commandLine_exitCode_CONFIG "Sockets are not acceptable in a rootfs ram disk"
+						else
+							core_exitError $core_commandLine_exitCode_UNAVAILABLE "What is ${fileEtcPath}?"
 						fi
 					done
 					
 				popd
-			} >"$outputInitramFsGenerateFilePath".directories-may-not-be-first.remainder
+			} >"$generatedPackagesFilePath"
+			rm -rf $initramfsContentsFolderPath
+			ln -s "$cpioOutputRootFolderPath" $initramfsContentsFolderPath
 			
-			# sort so 'dir' are first
-			cat "$outputInitramFsGenerateFilePath".directories-may-not-be-first.overrides "$outputInitramFsGenerateFilePath".directories-may-not-be-first.remainder | sort >"$outputInitramFsGenerateFilePath"
+			
+			
+			local mergedFilePath="$cpioOutputParentFolderPath"/001-merged.initramfs.contents
+			_libertine_compile_linux_iteratePackages _libertine_compile_linux_initramfs_mergeInitramfsContentsWhilstRemovingEmptyLinesAndComments
 
-			printf '\nCREATED CPIO ARCHIVE FILE\n' 1>&2
+			local allFilePath="$cpioOutputParentFolderPath"/002-all.initramfs.contents
+			cat "$generatedPackagesFilePath" "$mergedFilePath" >"$allFilePath"
+
+			local laterPackagesTrumpEarlierPackagesFilePath="$cpioOutputParentFolderPath"/003-later-packags-trump-earlier-packages.initramfs.contents
+			tac "$allFilePath" >"$laterPackagesTrumpEarlierPackagesFilePath"
+			
+			local deduplicatedFilePath="$cpioOutputParentFolderPath"/004-deduplicated.initramfs.contents
+			sort -u -k2,2 "$laterPackagesTrumpEarlierPackagesFilePath" >"$deduplicatedFilePath"
+			
+			local sortedSoDirAreFirstFilePath="$cpioOutputParentFolderPath"/005-sorted-so-dir-are-first.initramfs.contents
+			sort "$deduplicatedFilePath" >"$sortedSoDirAreFirstFilePath"
+			
+			rm -rf "$outputInitramFsGenerateFilePath"
+			ln -s "$sortedSoDirAreFirstFilePath" "$outputInitramFsGenerateFilePath"
+		}
+		
+		build_needs cp
+		_libertine_compile_linux_initramfs_installMachineFilesystemAsIfItWereOurOwn()
+		{
+			if [ -d "$libertine_machineSettingsFolderPath"/initramfs ]; then
+				libertine_public_copy_filesystem "$libertine_machineSettingsFolderPath"/initramfs/ "$(libertine_public_outputInitramfsPath)"/
+			fi
+			
+			local contentsFilePath="$libertine_machineSettingsFolderPath"/initramfs.contents
+			if [ -f "$contentsFilePath" ]; then
+				cp -f "$contentsFilePath" "$(libertine_public_outputInitramfsContentsFilePath)"
+			fi
 		}
 
-		build_needs sed rsync
-		_libertine_compile_linux_initramfs_combineInitramfsSysrootContents()
+		build_needs rsync
+		_libertine_compile_linux_initramfs_mergeInitramfsSysroots()
 		{
-			local dependentPackage="$core_variable_array_element"
-			
+			printf '\nRSYNC PACKAGE TO CPIO: %s\n' "$dependentPackage"
+			rsync --archive --itemize-changes --outbuf=Line "$(libertine_public_outputInitramfsPath "$dependentPackage")"/ "$cpioOutputRootFolderPath"/
+			printf 'RSYNC-ED PACKAGE TO CPIO: %s\n' "$dependentPackage"
+		}
+		
+		build_needs sed
+		_libertine_compile_linux_initramfs_mergeInitramfsContentsWhilstRemovingEmptyLinesAndComments()
+		{
 			sed \
 				-e '/^$/d' \
 				-e '/^#/d' \
-				-e '/^[a-z]* \/etc\/combine.d /d' \
-				-e '/^[a-z]* \/etc\/combine.d\/ /d' \
-				-e '/^[a-z]* \/etc\/combine.d\/.*/d' \
-				"$(libertine_public_outputInitramfsContentsFilePath "$dependentPackage")"
-			
-			printf '\n\nADDING PACKAGE TO CPIO: %s\n' "$dependentPackage" 1>&2
-			rsync --archive --itemize-changes --outbuf=Line "$(libertine_public_outputInitramfsPath "$dependentPackage")"/ "$initramfsContentsFolderPath"/ 1>&2
+				"$(libertine_public_outputInitramfsContentsFilePath "$dependentPackage")" \
+				>>"$mergedFilePath"
 		}
 		
 		build_needs rm
@@ -606,22 +638,40 @@ case "$package" in
 		{
 			local combineFilePath
 			set +f
-			for combineFilePath in "$initramfsContentsFolderPath"/etc/combine.d/*.combine
+			for combineFilePath in "$cpioOutputRootFolderPath"/etc/combine.d/*.combine
 			do
 				set -f
-				if [ ! -f "$combineFilePath" ]; then
-					continue
-				fi
-		
-				if [ ! -s "$combineFilePath" ]; then
-					continue
-				fi
-		
-				local folderPath fileName permissions mergeStrategy
-				while IFS=' ' read -r folderPath fileName permissions mergeStrategy
-				do
-	
-					local combinedFolderPath="$parentFolderPath"/"$fileName".d
+				# if [ ! -f "$combineFilePath" ]; then
+				# 	continue
+				# fi
+				#
+				# if [ ! -s "$combineFilePath" ]; then
+				# 	continue
+				# fi
+				
+				printf '%s\n' "Combining file '$combineFilePath'" 1>&2
+				
+				local parentFolderPath fileName permissions mergeStrategy
+				while IFS=' ' read -r parentFolderPath fileName permissions mergeStrategy
+				do	
+					case "$parentFolderPath" in
+						
+						/*)
+							:
+						;;
+						
+						*)
+							printf '%s\n' "A relative parentFolderPath '$parentFolderPath' is not allowed in the .combine file '$combineFilePath'" 1>&2
+							exit 1
+						;;
+						
+					esac
+					
+					local combinedFolderPath="$cpioOutputRootFolderPath""$parentFolderPath"/"$fileName".d
+					local combinedFilePath="$cpioOutputRootFolderPath""$parentFolderPath"/"$fileName"
+
+					printf '\t%s\n' "Combining to create '$combinedFilePath' using mergeStrategy '$mergeStrategy'" 1>&2
+					
 					local deleteWhenFinished=true
 					case "$mergeStrategy" in
 		
@@ -661,7 +711,9 @@ case "$package" in
 					esac
 					
 					if $deleteWhenFinished; then
-						rm -rf "$combinedFolderPath"
+						
+						# Permissions may be messy...
+						chmod -R 0755 "$combinedFolderPath"; rm -rf "$combinedFolderPath"
 					fi
 					
 				done <"$combineFilePath"
@@ -669,7 +721,7 @@ case "$package" in
 			done
 			set -f
 			
-			rm -rf "$initramfsContentsFolderPath"/etc/combine.d
+			chmod -R 0755 "$cpioOutputRootFolderPath"/etc/combine.d; rm -rf "$cpioOutputRootFolderPath"/etc/combine.d
 		}
 		
 		build_needs chmod
@@ -693,8 +745,6 @@ case "$package" in
 		build_needs chmod head sort cp
 		_libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategy_group()
 		{
-			local combinedFilePath="$parentFolderPath"/"$fileName"
-			
 			local TMP_FILE
 			core_temporaryFiles_newFileToRemoveOnExit
 			local temporaryFilePath="$TMP_FILE"
@@ -814,8 +864,6 @@ case "$package" in
 		_libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost()
 		{
 			local actionToTake="$1"
-	
-			local combinedFilePath="$parentFolderPath"/"$fileName"
 			
 			local TMP_FILE
 			core_temporaryFiles_newFileToRemoveOnExit
@@ -843,8 +891,10 @@ case "$package" in
 			set -f
 	
 			$actionToTake
-
-			chmod "$permissions" "$combinedFilePath"
+			
+			if [ -e "$combinedFilePath" ]; then
+				chmod "$permissions" "$combinedFilePath"
+			fi
 		}
 		
 		build_needs readlink
@@ -884,7 +934,7 @@ case "$package" in
 		build_needs cat chmod env sh cp
 		_libertine_compile_linux_replaceInstallShForIncreasedReproducibility()
 		{
-			local fileToChange="$inputPath"/arch/"$libertine_buildLinux"/boot/install.sh
+			local fileToChange="$inputPath"/arch/"$libertine_hostLinux"/boot/install.sh
 			local envShaBang="$(libertine_public_buildNeedsPath)"/env
 			{
 				printf '%s\n' "$envShaBang"
