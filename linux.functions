@@ -641,13 +641,6 @@ case "$package" in
 			for combineFilePath in "$cpioOutputRootFolderPath"/etc/combine.d/*.combine
 			do
 				set -f
-				# if [ ! -f "$combineFilePath" ]; then
-				# 	continue
-				# fi
-				#
-				# if [ ! -s "$combineFilePath" ]; then
-				# 	continue
-				# fi
 				
 				printf '%s\n' "Combining file '$combineFilePath'" 1>&2
 				
@@ -676,32 +669,32 @@ case "$package" in
 					case "$mergeStrategy" in
 		
 						nocombine)
-							_libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategy_nocombine
+							_libertine_compile_linux_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategy_nocombine
 							deleteWhenFinished=false
 						;;
 		
 						group)
-							_libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategy_group
+							_libertine_compile_linux_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategy_group
 						;;
 		
 						passwd)
-							_libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost _libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost_action_passwd
+							_libertine_compile_linux_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost passwd
 						;;
 		
 						shadow)
-							_libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost _libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost_action_shadow
+							_libertine_compile_linux_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost shadow
 						;;
 		
 						default)
-							_libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost _libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost_action_default
+							_libertine_compile_linux_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost default
 						;;
 		
 						hasfiles)
-							_libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost _libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost_action_hasfiles
+							_libertine_compile_linux_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost hasfiles
 						;;
 		
 						nosort)
-							_libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost _libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost_action_nosort
+							_libertine_compile_linux_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost nosort
 						;;
 		
 						*)
@@ -721,11 +714,11 @@ case "$package" in
 			done
 			set -f
 			
-			chmod -R 0755 "$cpioOutputRootFolderPath"/etc/combine.d; rm -rf "$cpioOutputRootFolderPath"/etc/combine.d
+			chmod -R 0755 "$cpioOutputRootFolderPath"/etc/combine.d; rm -rf "$cpioOutputRootFolderPath"/etc/combine.
 		}
 		
 		build_needs chmod
-		_libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategy_nocombine()
+		_libertine_compile_linux_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategy_nocombine()
 		{
 			local individualFilePath
 			set +f
@@ -743,54 +736,37 @@ case "$package" in
 		}
 		
 		build_needs chmod head sort cp
-		_libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategy_group()
+		_libertine_compile_linux_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategy_group()
 		{
 			local TMP_FILE
 			core_temporaryFiles_newFileToRemoveOnExit
 			local temporaryFilePath="$TMP_FILE"
 	
 			printf '' >"$temporaryFilePath"
-	
+			
 			local groupFilePath
 			set +f
-			for groupFilePath in "$combinedFolderPath"/*."$fileName".d
+			for groupFilePath in "$combinedFolderPath"/*
 			do
 				set -f
-				if [ ! -f "$groupFilePath" ]; then
-					continue
-				fi
-				if [ ! -s "$groupFilePath" ]; then
-					continue
-				fi
 		
 				local groupWithoutExtensionPath="${groupFilePath%*.${fileName}.d}"
 				local groupName="${groupWithoutExtensionPath##*/}"
-		
-				local groupIdFilePath="$groupFilePath"/id
-		
-				if [ ! -f "$groupIdFilePath" ]; then
-					continue
-				fi
-				if [ ! -s "$groupIdFilePath" ]; then
-					continue
-				fi
-				local groupId="$(head -n 1 "$groupIdFilePath")"
-						
+				local groupId="$(head -n 1 "$groupFilePath"/id)"
+					
 				local users=''
 				local userFilePath
 				set +f
-				for userFilePath in "$groupFilePath".d/*.user
+				for userFilePath in "$groupFilePath"/*.user
 				do
 					set -f
-					if [ ! -f "$userFilePath" ]; then
+					
+					if [ ! -e "$userFilePath" ]; then
 						continue
 					fi
-					if [ ! -s "$userFilePath" ]; then
-						continue
-					fi
-		
+							
 					local userWithoutExtensionPath="${userFilePath%*.user}"
-					local userName="${userWithoutExtensionPathh##*/}"
+					local userName="${userWithoutExtensionPath##*/}"
 			
 					if [ -n "$users" ]; then
 						users="${users},"
@@ -803,7 +779,7 @@ case "$package" in
 			done
 
 			# Create file
-			sort -u -t : -k 3 "$temporaryFilePath" >"$combinedFilePath"
+			sort -u -n -t : -k 3 "$temporaryFilePath" >"$combinedFilePath"
 	
 			# Create backup file
 			local backupFilePath="$combinedFilePath"-
@@ -814,54 +790,8 @@ case "$package" in
 			chmod "$permissions" "$combinedFilePath"
 		}
 		
-		build_needs sort cp chmod
-		_libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost_action_passwd()
-		{
-			# Create file
-			sort -u -t : -k 3 "$temporaryFilePath" >"$combinedFilePath"
-	
-			# Create backup file
-			local backupFilePath="$combinedFilePath"-
-			cp -f "$combinedFilePath" "$backupFilePath"
-			chmod "$permissions" "$backupFilePath"
-		}
-		
-		build_needs sort cp chmod
-		_libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost_action_shadow()
-		{
-			# Create file
-			sort -u "$temporaryFilePath" >"$combinedFilePath"
-	
-			# Create backup file
-			local backupFilePath="$combinedFilePath"-
-			cp -f "$combinedFilePath" "$backupFilePath"
-			chmod "$permissions" "$backupFilePath"
-		}
-		
-		build_needs sort
-		_libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost_action_default()
-		{
-			# We should really normalise whitespace and merge lines before doing this
-			# Hard task to merge IPv6 lines as they have multiple naming choices
-			sort -u "$temporaryFilePath" >"$combinedFilePath"
-		}
-		
-		build_needs sort
-		_libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost_action_hasfiles()
-		{
-			if $hasFiles; then
-				sort -u "$temporaryFilePath" >"$combinedFilePath"
-			fi
-		}
-
-		build_needs cp
-		_libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost_action_nosort()
-		{
-			cp "$temporaryFilePath" "$combinedFilePath"
-		}
-		
-		build_needs chmod sed
-		_libertine_compile_linuex_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost()
+		build_needs chmod sed rm
+		_libertine_compile_linux_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost()
 		{
 			local actionToTake="$1"
 			
@@ -870,7 +800,6 @@ case "$package" in
 			local temporaryFilePath="$TMP_FILE"
 	
 			printf '' >"$temporaryFilePath"
-			chmod "$permissions" "$temporaryFilePath"
 	
 			local hasFiles=false
 			local individualFilePath
@@ -890,11 +819,58 @@ case "$package" in
 			done
 			set -f
 	
-			$actionToTake
+			_libertine_compile_linux_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost_action_$actionToTake
 			
 			if [ -e "$combinedFilePath" ]; then
 				chmod "$permissions" "$combinedFilePath"
 			fi
+			rm -rf "$temporaryFilePath"
+		}
+		
+		build_needs sort cp chmod
+		_libertine_compile_linux_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost_action_passwd()
+		{			
+			# Create file
+			sort -u -n -t : -k 3 "$temporaryFilePath" >"$combinedFilePath"
+	
+			# Create backup file
+			local backupFilePath="$combinedFilePath"-
+			cp -f "$combinedFilePath" "$backupFilePath"
+			chmod "$permissions" "$backupFilePath"
+		}
+		
+		build_needs sort cp chmod
+		_libertine_compile_linux_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost_action_shadow()
+		{
+			# Create file
+			sort -u "$temporaryFilePath" >"$combinedFilePath"
+	
+			# Create backup file
+			local backupFilePath="$combinedFilePath"-
+			cp -f "$combinedFilePath" "$backupFilePath"
+			chmod "$permissions" "$backupFilePath"
+		}
+		
+		build_needs sort
+		_libertine_compile_linux_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost_action_default()
+		{
+			# We should really normalise whitespace and merge lines before doing this
+			# Hard task to merge IPv6 lines as they have multiple naming choices
+			sort -u "$temporaryFilePath" >"$combinedFilePath"
+		}
+		
+		build_needs sort
+		_libertine_compile_linux_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost_action_hasfiles()
+		{
+			if $hasFiles; then
+				sort -u "$temporaryFilePath" >"$combinedFilePath"
+			fi
+		}
+
+		build_needs cp
+		_libertine_compile_linux_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost_action_nosort()
+		{
+			cp "$temporaryFilePath" "$combinedFilePath"
 		}
 		
 		build_needs readlink
