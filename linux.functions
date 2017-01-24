@@ -127,9 +127,12 @@ case "$package" in
 			_libertine_compile_linux_prep_fixGenInitramfsListSh
 			
 			_libertine_compile_linux_prep_menuconfigAlterationsBeforeNonKernelSuppliedModules "$configFilePath"
-						
+			
 			# Fix-up grecurity plugin compilation for cross-compiling
 			_libertine_compile_linux_prep_fixGrsecurityGccPluginsForCrossCompilation
+			
+			# Fix-up grecurity Makefile assuming absolute paths
+			_libertine_compile_linux_prep_fixGrsecurityAbsolutePaths
 			
 			# Linux's Makefile and other tools assume /bin/bash
 			_libertine_compile_linux_prep_fixHardcodedBashReferencesInMakefileAndElsewhere "$(libertine_public_sourcePath)"
@@ -273,7 +276,16 @@ case "$package" in
 				-e 's/-shared/-shared -static-libstdc++/g' \
 				"$(libertine_public_sourcePath)"/scripts/Makefile.host
 		}
-
+		
+		build_needs sed
+		_libertine_compile_linux_prep_fixGrsecurityAbsolutePaths()
+		{
+			sed -i \
+				-e '/\/boot/d' \
+				-e '/\/lib/d' \
+				"$(libertine_public_sourcePath)"/grsecurity/Makefile
+		}
+		
 		build_needs sed
 		_libertine_compile_linux_prep_fixHardcodedGccReferencesInMakefile()
 		{
@@ -408,11 +420,27 @@ case "$package" in
 			local inputPath="$(libertine_public_inputMakePath)"
 			local initramfsContentsFolderPath="$inputPath"/initramfs
 			local outputInitramFsGenerateFilePath="$inputPath"/initramfs.contents
+			local configFilePath="$inputPath"/.config
+			
+			local linux_machine="$libertine_machine"
+
+			if core_variable_isUnset linux_domain; then
+				linux_domain='localdomain'
+			fi
+			
+			if core_variable_isUnset linux_resolvConf_search; then
+				linux_resolvConf_search="$linux_domain"
+			fi
+
+			if core_variable_isUnset linux_resolvConf_nameservers; then
+				linux_resolvConf_nameservers='8.8.4.4 8.8.8.8 2001:4860:4860::8844 2001:4860:4860::8888'
+			fi
 			
 			_libertine_compile_linux_copyLinuxPrepOutputAndRemoveUnwantedInitramfsStuff
 			
-			_libertine_compile_linux_menuconfigAdjustments "$inputPath"/.config "$outputInitramFsGenerateFilePath"
-			_libertine_compile_linux_menuconfigAlterationsForCmdline "$inputPath"/.config
+			_libertine_compile_linux_menuconfigAdjustments "$configFilePath" "$outputInitramFsGenerateFilePath"
+			_libertine_compile_linux_menuconfigAlterationsForHostName "$configFilePath"
+			_libertine_compile_linux_menuconfigAlterationsForCmdline "$configFilePath"
 			
 			_libertine_compile_linux_initramfs_createCpioArchiveInputFile "$outputInitramFsGenerateFilePath"
 			
@@ -421,6 +449,9 @@ case "$package" in
 			_libertine_compile_linux_replaceInstallShForIncreasedReproducibility
 			
 			_libertine_compile_linux_make "$inputPath" INSTALL_PATH="$(libertine_public_outputMiscPath)" install
+			
+			printf '\n\n%s\n' "It's time to kick the tires and light the fires..."
+			printf '\n\n%s\n' "It's time to kick the tires and light the fires..." 1>&2
 		}
 		
 		build_needs mkdir rm
@@ -439,6 +470,26 @@ case "$package" in
 			mkdir -m 0700 -p "$initramfsContentsFolderPath"
 			
 			rm -rf "$outputInitramFsGenerateFilePath"
+		}
+		
+		build_needs sed rm
+		_libertine_compile_linux_menuconfigAlterationsForHostName()
+		{
+			local configFilePath="$1"
+			
+			libertine_public_menuconfig_adjust CONFIG_DEFAULT_HOSTNAME "$linux_machine" true "$configFilePath"
+			
+			pushd "$(libertine_public_inputMakePath)"
+				
+				sed -i -e 's;#define UTS_DOMAINNAME "(none)";#define UTS_DOMAINNAME "'"$linux_domain"'";g' include/linux/uts.h
+				
+				rm -rf \
+					arch/x86/boot/compressed/aslr.o \
+					drivers/usb/gadget/legacy/inode.o \
+					init/version.o \
+					kernel/utsname.o \
+					kernel/utsname_sysctl.o
+			popd
 		}
 		
 		build_needs head
@@ -532,6 +583,8 @@ case "$package" in
 		build_needs ln rm mkdir sed tac sort find cat chmod
 		_libertine_compile_linux_initramfs_createCpioArchiveInputFile()
 		{
+			_libertine_compile_linux_initramfs_generateEssentialPerMachineNetworkingFiles
+			
 			_libertine_compile_linux_initramfs_installMachineFilesystemAsIfItWereOurOwn
 			
 			
@@ -600,6 +653,39 @@ case "$package" in
 			
 			rm -rf "$outputInitramFsGenerateFilePath"
 			ln -s "$sortedSoDirAreFirstFilePath" "$outputInitramFsGenerateFilePath"
+		}
+		
+		build_needs mkdir
+		_libertine_compile_linux_initramfs_generateEssentialPerMachineNetworkingFiles()
+		{
+			local etcFolderPath="$(libertine_public_outputInitramfsPath)"/etc
+			mkdir -m 0755 -p "$etcFolderPath"
+			
+			# Create /etc/hostname
+			printf '%s\n' "$linux_machine" >"$etcFolderPath"/hostname
+			
+			# Create /etc/dnsdomainname
+			printf '%s\n' "$linux_domain" >"$etcFolderPath"/dnsdomainname
+			
+			# Create /etc/resolv.conf
+			{
+				printf 'domain %s\n' "$linux_resolvConf_search"
+				
+				IFS=' ' set -- $linux_resolvConf_nameservers
+				local nameserver
+				for nameserver in "$@"
+				do
+					printf 'nameserver %s\n' "$nameserver"
+				done
+				
+				printf 'options rotate\n'
+				printf 'options attempt:5\n'
+				printf 'options timeout:2\n'
+				# Prefer IPv6 AAAA queries, and wrap A query answers as IPv4 in IPv6 addresses
+				#printf 'options inet6\n'
+				#printf 'options edns0\n'
+		
+			} >"$etcFolderPath"/resolv.conf
 		}
 		
 		build_needs cp
@@ -714,7 +800,7 @@ case "$package" in
 			done
 			set -f
 			
-			chmod -R 0755 "$cpioOutputRootFolderPath"/etc/combine.d; rm -rf "$cpioOutputRootFolderPath"/etc/combine.
+			chmod -R 0755 "$cpioOutputRootFolderPath"/etc/combine.d; rm -rf "$cpioOutputRootFolderPath"/etc/combine.d
 		}
 		
 		build_needs chmod
