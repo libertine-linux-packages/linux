@@ -60,6 +60,9 @@ case "$package" in
 		fi
 		if $linux_prep_enableZfs; then
 			depends zlib libuuid libtirpc libblkid
+			
+			depends build_paxctl
+			build_needs paxctl
 		fi
 		
 		depends build_slibtool
@@ -396,7 +399,16 @@ case "$package" in
 	
 			popd
 			
-			libertine_public_installAndStripBinariesIn sbin mount.zfs zdb zed zfs zhack zinject zpios zpool zstreamdump ztest
+			libertine_public_installAndStripBinaryIn sbin mount.zfs
+			libertine_public_installAndStripBinaryIn sbin zdb
+			libertine_public_installAndStripBinaryIn sbin zed
+			libertine_public_installAndStripBinaryIn sbin zfs
+			libertine_public_installAndStripBinaryIn sbin zhack
+			libertine_public_installAndStripBinaryIn sbin zinject
+			libertine_public_installAndStripBinaryIn sbin zpios
+			libertine_public_installAndStripBinaryIn sbin zpool
+			libertine_public_installAndStripBinaryIn sbin zstreamdump
+			libertine_public_installAndStripBinaryIn sbin ztest
 		}
 
 		_libertine_compile_linux_prep_menuconfigAlterationsForZfsAfterNonKernelSuppliedModules()
