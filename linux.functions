@@ -18,11 +18,6 @@ case "$package" in
 	;;
 	
 	linux_prep|linux)
-		
-		# Note: Same value is used in lib/shellfire/path.functions _libertine_path_fakeUname() to fake uname
-		_libertine_compile_linux_buildTimestampString='Thu Jun 16 09:22:17 UTC 2016'
-		# GNU coreutils date: date -d"$_libertine_compile_linux_buildTimestampString" +%s  (BusyBox date doesn't work)
-		_libertine_compile_linux_buildTimestampNumber='1466068937'
 	
 		variant=upstream
 		
@@ -99,7 +94,7 @@ case "$package" in
 				libertine_public_make \
 					V=2 \
 					ARCH="$libertine_hostLinuxSpecific" \
-					KBUILD_BUILD_TIMESTAMP="Thu Jun 16 09:22:17 UTC 2016" \
+					KBUILD_BUILD_TIMESTAMP="$libertine_hostUnameTimestamp" \
 					KBUILD_BUILD_USER='libertine' \
 					KBUILD_BUILD_HOST='libertine' \
 					CROSS_COMPILE="$libertine_host"- \
@@ -204,11 +199,11 @@ case "$package" in
 			_libertine_compile_linux_prep_fixGenInitramfsListSh_xzArguments
 			
 			sed -i \
-				-e 's;my_mtime=$(find "\$1" -printf "%T@\\n" | sort -r | head -n 1);my_mtime='"$_libertine_compile_linux_buildTimestampNumber"';g' \
+				-e 's;my_mtime=$(find "\$1" -printf "%T@\\n" | sort -r | head -n 1);my_mtime='"$libertine_hostUnameTimestampSecondsSince1970"';g' \
 				-e 's/-printf "%p %m %U %G\\n"/| xargs stat -c "%n %a %u %g"/g' \
 				-e 's;xz --check=crc32 --lzma2=dict=1MiB;xz '"$xzArguments"';g' \
 				-e 's;\$(date -d"\$KBUILD_.*;";g' \
-				-e 's;usr/gen_init_cpio \$timestamp ;usr/gen_init_cpio -t '"$_libertine_compile_linux_buildTimestampNumber"' ;g' \
+				-e 's;usr/gen_init_cpio \$timestamp ;usr/gen_init_cpio -t '"$libertine_hostUnameTimestampSecondsSince1970"' ;g' \
 				"$(libertine_public_sourcePath)"/scripts/gen_initramfs_list.sh
 		}
 		
@@ -427,6 +422,7 @@ case "$package" in
 		depends build_rsync
 		build_needs rsync
 		
+		build_needs touch
 		libertine_compile_linux()
 		{
 			local inputPath="$(libertine_public_inputMakePath)"
@@ -461,6 +457,8 @@ case "$package" in
 			_libertine_compile_linux_replaceInstallShForIncreasedReproducibility
 			
 			_libertine_compile_linux_make "$inputPath" INSTALL_PATH="$(libertine_public_outputMiscPath)" install
+			
+			touch -t "$libertine_hostUnameTimestampTouch" "$(libertine_public_outputMiscPath)"/vmlinuz
 			
 			printf '\n\n%s\n' "It's time to kick the tires and light the fires..."
 			printf '\n\n%s\n' "It's time to kick the tires and light the fires..." 1>&2
@@ -592,7 +590,7 @@ case "$package" in
 			core_variable_array_element='linux' _libertine_compile_linux_iteratePackages_callback "$callback"
 		}
 		
-		build_needs ln rm mkdir sed tac sort find cat chmod
+		build_needs ln rm mkdir sed tac sort find cat chmod xargs touch
 		_libertine_compile_linux_initramfs_createCpioArchiveInputFile()
 		{
 			_libertine_compile_linux_initramfs_generateEssentialPerMachineNetworkingFiles
@@ -606,10 +604,13 @@ case "$package" in
 			mkdir -m 0755 -p "$cpioOutputRootFolderPath"
 			
 			
-			
-			local generatedPackagesFilePath="$cpioOutputParentFolderPath"/000-generated.initramfs.contents
+			# Combine initramfs sysroots and give all files and folder the same timestamp
 			_libertine_compile_linux_iteratePackages _libertine_compile_linux_initramfs_mergeInitramfsSysroots 1>&2
 			chmod 0755 "$cpioOutputRootFolderPath"  # Forces what will become '/' to have correct permissions after rsync merge
+			find . -depth -print0 | xargs -0 touch -c -h -t "$libertine_hostUnameTimestampTouch"
+			
+			
+			local generatedPackagesFilePath="$cpioOutputParentFolderPath"/000-generated.initramfs.contents
 			_libertine_compile_linux_initramfs_combineSnippetsAndRemoveFromInitramfs
 			{
 				pushd "$cpioOutputRootFolderPath"
@@ -646,6 +647,8 @@ case "$package" in
 			rm -rf $initramfsContentsFolderPath
 			ln -s "$cpioOutputRootFolderPath" $initramfsContentsFolderPath
 			
+			
+						
 			
 			
 			local mergedFilePath="$cpioOutputParentFolderPath"/001-merged.initramfs.contents
