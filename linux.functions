@@ -50,7 +50,7 @@ case "$package" in
 		depends build_busybox
 		build_needs cmp tail bzip2 od cut touch xargs echo sort uniq mktemp dirname basename install sed gzip date head fgrep readlink expr wc uname seq
 		# seq is needed by grsecurity's generate_size_overflow_hash.sh
-				
+		
 		# SPL / ZFS
 		if core_variable_isUnset linux_prep_enableZfs; then
 			linux_prep_enableZfs='true'
@@ -60,16 +60,24 @@ case "$package" in
 			
 			depends build_paxctl
 			build_needs paxctl
+
+			depends build_slibtool
+			build_needs clibtool-static libtoolize realpath
+
+			depends build_perl
+			build_needs perl
+
+			depends build_autoconf
+			build_needs autoconf autoheader autom4te autoreconf autoscan autoupdate ifnames
+
+			depends build_automake
+			build_needs automake aclocal
+
+			depends build_gnum4
+			build_needs m4
 		fi
 		
-		depends build_slibtool
-		build_needs clibtool-static libtoolize
-		
-		build_needs autoreconf autoconf autoheader automake aclocal expr autom4te m4 install sort ls sleep
-
-		# scripts/gen_initramfs_list.sh
-		
-		# Needs the 'full' xz, not BusyBox's
+		# Needs the 'full' xz, not BusyBox's, for scripts/gen_initramfs_list.sh
 		depends build_xz_utils_xz
 		build_needs xz
 		build_needs which
