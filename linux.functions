@@ -48,7 +48,7 @@ case "$package" in
 		build_needs bc
 		
 		depends build_busybox
-		build_needs cmp tail bzip2 od cut touch xargs echo sort uniq mktemp dirname basename install sed gzip date head fgrep readlink expr wc uname seq
+		build_needs cmp tail bzip2 od cut touch xargs echo sort uniq mktemp dirname basename install sed gzip date head fgrep readlink expr wc uname seq diff
 		# seq is needed by grsecurity's generate_size_overflow_hash.sh
 		
 		# SPL / ZFS
@@ -443,7 +443,7 @@ case "$package" in
 			local linux_machine="$libertine_machine"
 
 			if core_variable_isUnset linux_domain; then
-				linux_domain='localdomain'
+				linux_domain="$libertine_hostUnameDomainName"
 			fi
 			
 			if core_variable_isUnset linux_resolvConf_search; then
@@ -521,7 +521,8 @@ case "$package" in
 			local actualCommandLine=''
 			_libertine_compile_linux_menuconfigAlterationsForCmdline_processPackageCommandLine()
 			{
-				local dependentPackage="$core_variable_array_element"
+				local dependentPackage="$1"
+				shift 1
 			
 				local kernelBootCommandLineFilePath="$(libertine_public_outputKernelBootCommandLineFilePath "$dependentPackage")"
 
@@ -540,7 +541,7 @@ case "$package" in
 					actualCommandLine="$actualCommandLine $value"
 				fi
 			}
-			core_variable_array_iterate _libertine_compile_built _libertine_compile_linux_menuconfigAlterationsForCmdline_processPackageCommandLine
+			libertine_public_iterateOverAllProductionPackagesInReverseDependencyOrder 'linux' _libertine_compile_linux_menuconfigAlterationsForCmdline_processPackageCommandLine
 			
 			if core_variable_isUnsetOrEmpty linux_postpendToBuiltInCommandLine; then
 				:
@@ -571,35 +572,6 @@ case "$package" in
 			fi
 		}
 		
-		_libertine_compile_linux_iteratePackages_callback()
-		{
-			local dependentPackage="$core_variable_array_element"
-			local callback="$1"
-			shift 1
-			
-			case "$dependentPackage" in
-				
-				build_*)
-					:
-				;;
-				
-				*)
-					$callback "$@"
-				;;
-				
-			esac
-		}
-		
-		_libertine_compile_linux_iteratePackages()
-		{
-			local callback="$1"
-			
-			core_variable_array_iterate _libertine_compile_built _libertine_compile_linux_iteratePackages_callback "$callback"
-			
-			# And ourselves (ie machine filesystem)
-			core_variable_array_element='linux' _libertine_compile_linux_iteratePackages_callback "$callback"
-		}
-		
 		build_needs ln rm mkdir sed tac sort find cat chmod xargs touch
 		_libertine_compile_linux_initramfs_createCpioArchiveInputFile()
 		{
@@ -615,7 +587,7 @@ case "$package" in
 			
 			
 			# Combine initramfs sysroots and give all files and folder the same timestamp
-			_libertine_compile_linux_iteratePackages _libertine_compile_linux_initramfs_mergeInitramfsSysroots 1>&2
+			libertine_public_iterateOverAllProductionPackagesInReverseDependencyOrder 'linux' _libertine_compile_linux_initramfs_mergeInitramfsSysroots 1>&2
 			chmod 0755 "$cpioOutputRootFolderPath"  # Forces what will become '/' to have correct permissions after rsync merge
 			find . -depth -print0 | xargs -0 touch -c -h -t "$libertine_hostUnameTimestampTouch"
 			
@@ -662,7 +634,7 @@ case "$package" in
 			
 			
 			local mergedFilePath="$cpioOutputParentFolderPath"/001-merged.initramfs.contents
-			_libertine_compile_linux_iteratePackages _libertine_compile_linux_initramfs_mergeInitramfsContentsWhilstRemovingEmptyLinesAndComments
+			libertine_public_iterateOverAllProductionPackagesInReverseDependencyOrder 'linux' _libertine_compile_linux_initramfs_mergeInitramfsContentsWhilstRemovingEmptyLinesAndComments
 
 			local allFilePath="$cpioOutputParentFolderPath"/002-all.initramfs.contents
 			cat "$generatedPackagesFilePath" "$mergedFilePath" >"$allFilePath"
@@ -729,18 +701,24 @@ case "$package" in
 		build_needs rsync
 		_libertine_compile_linux_initramfs_mergeInitramfsSysroots()
 		{
-			printf '\nRSYNC PACKAGE TO CPIO: %s\n' "$dependentPackage"
-			rsync --archive --itemize-changes --outbuf=Line "$(libertine_public_outputInitramfsPath "$dependentPackage")"/ "$cpioOutputRootFolderPath"/
-			printf 'RSYNC-ED PACKAGE TO CPIO: %s\n' "$dependentPackage"
+			local package="$1"
+			shift 1
+			
+			printf '\nRSYNC PACKAGE TO CPIO: %s\n' "$package"
+			rsync --archive --itemize-changes --outbuf=Line "$(libertine_public_outputInitramfsPath "$package")"/ "$cpioOutputRootFolderPath"/
+			printf 'RSYNC-ED PACKAGE TO CPIO: %s\n' "$package"
 		}
 		
 		build_needs sed
 		_libertine_compile_linux_initramfs_mergeInitramfsContentsWhilstRemovingEmptyLinesAndComments()
 		{
+			local package="$1"
+			shift 1
+			
 			sed \
 				-e '/^$/d' \
 				-e '/^#/d' \
-				"$(libertine_public_outputInitramfsContentsFilePath "$dependentPackage")" \
+				"$(libertine_public_outputInitramfsContentsFilePath "$package")" \
 				>>"$mergedFilePath"
 		}
 		
