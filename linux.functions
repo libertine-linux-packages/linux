@@ -7,7 +7,9 @@ case "$package" in
 	build_musl_cross_make_linux)
 		
 		variant=empty
-		
+
+		depends build_busybox
+				
 		copy_subset="$variant"
 		
 		libertine_compile_build_musl_cross_make_linux()
