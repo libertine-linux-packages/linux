@@ -10,3 +10,6 @@
 [submodule "linux-patches"]
 	path = linux-patches
 	url = https://github.com/libertine-linux/linux-patches.git
+[submodule "linux-firmware"]
+	path = linux-firmware
+	url = https://kernel.googlesource.com/pub/scm/linux/kernel/git/firmware/linux-firmware.git

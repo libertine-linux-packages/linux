@@ -252,6 +252,8 @@ case "$package" in
 			libertine_public_menuconfig_adjust CONFIG_CROSS_COMPILE "$libertine_host"- true "$configFilePath"
 			libertine_public_menuconfig_adjust CONFIG_INITRAMFS_ROOT_UID "$(id -u)" false "$configFilePath"
 			libertine_public_menuconfig_adjust CONFIG_INITRAMFS_ROOT_GID "$(id -g)" false "$configFilePath"
+			# CONFIG_EXTRA_FIRMWARE="intel-ucode/06-3a-09 amd-ucode/microcode_amd_fam15h.bin"
+			libertine_public_menuconfig_adjust CONFIG_EXTRA_FIRMWARE_DIR "$(libertine_public_packagePath)"/linux-firmware true "$configFilePath"
 		}
 		
 		build_needs sed cat
