@@ -136,8 +136,8 @@ case "$package" in
 			
 			_libertine_compile_linux_prep_menuconfigAlterationsBeforeNonKernelSuppliedModules "$configFilePath"
 			
-			# Fix-up grecurity plugin compilation for cross-compiling
-			_libertine_compile_linux_prep_fixGrsecurityGccPluginsForCrossCompilation
+			# Fix-up gcc plugin compilation for cross-compiling
+			_libertine_compile_linux_prep_fixGccPluginsForCrossCompilation
 			
 			# Fix-up grecurity Makefile assuming absolute paths
 			_libertine_compile_linux_prep_fixGrsecurityAbsolutePaths
@@ -219,7 +219,7 @@ case "$package" in
 		
 		_libertine_compile_linux_prep_nonKernelSuppliedModule_buildSplAndZfs()
 		{
-			printf '\n\n\nZFS does not compile with grsec currently (Jan 20 2017)\n\n\n' 1>&2
+			printf '\n\n\nZFS on Linux 4.4 does not compile with grsec currently (Jan 20 2017)\n\n\n' 1>&2
 			return 0
 			
 			# We do this as SPL and ZFS both look for a hardcoded 'cpp'
@@ -255,7 +255,7 @@ case "$package" in
 		}
 		
 		build_needs sed cat
-		_libertine_compile_linux_prep_fixGrsecurityGccPluginsForCrossCompilation()
+		_libertine_compile_linux_prep_fixGccPluginsForCrossCompilation()
 		{
 			# Note this does not fix the problem that system.h (in plugin/include) requires gmp.h or libiberty.h creating a conflicting basename because gcc's auto-host.h is incorrectly generated
 			cat <<-'EOF' >"$(libertine_public_sourcePath)"/scripts/gcc-plugin.sh
@@ -277,8 +277,8 @@ case "$package" in
 			local mpfrLibraryPath="$objToolchainFolderPath"/mpfr/src/.libs
 			
 			sed -i \
-				-e 's,HOST_EXTRACXXFLAGS +=,HOST_EXTRACXXFLAGS += -I'"$gmpIncludePath"' -L'"$gmpLibraryPath"' -I'"$mpcIncludePath"' -L'"$mpcLibraryPath"' -I'"$mpfrIncludePath"' -L'"$mpfrLibraryPath"',g' \
-				"$(libertine_public_sourcePath)"/tools/gcc/Makefile
+				-e 's,HOST_EXTRACXXFLAGS += -I,HOST_EXTRACXXFLAGS += -I'"$gmpIncludePath"' -L'"$gmpLibraryPath"' -I'"$mpcIncludePath"' -L'"$mpcLibraryPath"' -I'"$mpfrIncludePath"' -L'"$mpfrLibraryPath"' -I,g' \
+				"$(libertine_public_sourcePath)"/scripts/gcc-plugins/Makefile
 			
 			sed -i \
 				-e 's/-shared/-shared -static-libstdc++/g' \
