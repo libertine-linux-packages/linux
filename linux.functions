@@ -707,7 +707,7 @@ case "$package" in
 			shift 1
 			
 			printf '\nRSYNC PACKAGE TO CPIO: %s\n' "$package"
-			rsync --archive --itemize-changes --outbuf=Line "$(libertine_public_outputInitramfsPath "$package")"/ "$cpioOutputRootFolderPath"/
+			rsync --archive --itemize-changes --inplace --super --whole-file --outbuf=Line "$(libertine_public_outputInitramfsPath "$package")"/ "$cpioOutputRootFolderPath"/
 			printf 'RSYNC-ED PACKAGE TO CPIO: %s\n' "$package"
 		}
 		
