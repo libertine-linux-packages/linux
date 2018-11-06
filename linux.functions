@@ -139,7 +139,7 @@ case "$package" in
 			# Fix-up gcc plugin compilation for cross-compiling
 			_libertine_compile_linux_prep_fixGccPluginsForCrossCompilation
 			
-			# Fix-up grecurity Makefile assuming absolute paths
+			# Fix-up grsecurity Makefile assuming absolute paths
 			_libertine_compile_linux_prep_fixGrsecurityAbsolutePaths
 			
 			# Linux's Makefile and other tools assume /bin/bash
@@ -219,8 +219,10 @@ case "$package" in
 		
 		_libertine_compile_linux_prep_nonKernelSuppliedModule_buildSplAndZfs()
 		{
-			printf '\n\n\nZFS on Linux 4.4 does not compile with grsec currently (Jan 20 2017)\n\n\n' 1>&2
-			return 0
+			if [ -e "$(libertine_public_sourcePath)"/grsecurity ]; then
+				printf '\n\n\nZFS on Linux 4.4 does not compile with grsec currently (Jan 20 2017)\n\n\n' 1>&2
+				return 0
+			fi
 			
 			# We do this as SPL and ZFS both look for a hardcoded 'cpp'
 			libertine_public_addOrReplaceBinaryInPath cpp "$libertine_build"-cpp
@@ -290,10 +292,12 @@ case "$package" in
 		build_needs sed
 		_libertine_compile_linux_prep_fixGrsecurityAbsolutePaths()
 		{
-			sed -i \
-				-e '/\/boot/d' \
-				-e '/\/lib/d' \
-				"$(libertine_public_sourcePath)"/grsecurity/Makefile
+			if [ -e "$(libertine_public_sourcePath)"/grsecurity ]; then
+				sed -i \
+					-e '/\/boot/d' \
+					-e '/\/lib/d' \
+					"$(libertine_public_sourcePath)"/grsecurity/Makefile
+			fi
 		}
 		
 		build_needs sed
