@@ -42,7 +42,7 @@ case "$package" in
 		build_needs "$libertine_build"-cpp "$libertine_build"-cc "$libertine_build"-gcc "$libertine_build"-c++ "$libertine_build"-g++ "$libertine_build"-ar "$libertine_build"-ld "$libertine_build"-ranlib
 		
 		depends build_musl_cross_make_host
-		build_needs "$libertine_host"-cpp "$libertine_host"-cc "$libertine_host"-gcc "$libertine_host"-ar "$libertine_host"-ld "$libertine_host"-ranlib "$libertine_host"-strip "$libertine_host"-nm "$libertine_host"-objcopy "$libertine_host"-objdump
+		build_needs "$libertine_host"-cpp "$libertine_host"-cc "$libertine_host"-gcc "$libertine_host"-ar "$libertine_host"-ld "$libertine_host"-ranlib "$libertine_host"-strip "$libertine_host"-nm "$libertine_host"-objcopy "$libertine_host"-objdump "$libertine_host"-readelf
 		
 		depends build_bc
 		build_needs bc
@@ -475,9 +475,6 @@ case "$package" in
 			_libertine_compile_linux_make "$inputPath" INSTALL_PATH="$(libertine_public_outputMiscPath)" install
 			
 			touch -t "$libertine_hostUnameTimestampTouch" "$(libertine_public_outputMiscPath)"/vmlinuz
-			
-			printf '\n\n%s\n' "It's time to kick the tires and light the fires..."
-			printf '\n\n%s\n' "It's time to kick the tires and light the fires..." 1>&2
 		}
 		
 		build_needs mkdir rm
@@ -645,7 +642,7 @@ case "$package" in
 			local allFilePath="$cpioOutputParentFolderPath"/002-all.initramfs.contents
 			cat "$generatedPackagesFilePath" "$mergedFilePath" >"$allFilePath"
 
-			local laterPackagesTrumpEarlierPackagesFilePath="$cpioOutputParentFolderPath"/003-later-packags-trump-earlier-packages.initramfs.contents
+			local laterPackagesTrumpEarlierPackagesFilePath="$cpioOutputParentFolderPath"/003-later-packages-trump-earlier-packages.initramfs.contents
 			tac "$allFilePath" >"$laterPackagesTrumpEarlierPackagesFilePath"
 			
 			local deduplicatedFilePath="$cpioOutputParentFolderPath"/004-deduplicated.initramfs.contents
