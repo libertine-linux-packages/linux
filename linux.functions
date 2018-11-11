@@ -438,6 +438,15 @@ case "$package" in
 		depends build_rsync
 		build_needs rsync
 		
+		depends build_mlb
+		build_needs mlbinstall
+		
+		depends build_dosfstools
+		build_needs mkfs.fat
+		
+		depends build_gptfdisk
+		build_needs sgdisk
+		
 		build_needs touch
 		libertine_compile_linux()
 		{
@@ -457,7 +466,7 @@ case "$package" in
 			fi
 
 			if core_variable_isUnset linux_resolvConf_nameservers; then
-				linux_resolvConf_nameservers='8.8.4.4 8.8.8.8 2001:4860:4860::8844 2001:4860:4860::8888'
+				linux_resolvConf_nameservers='1.1.1.1 1.0.0.1 2606:4700:4700::1111 2606:4700:4700::1001'
 			fi
 			
 			_libertine_compile_linux_copyLinuxPrepOutputAndRemoveUnwantedInitramfsStuff
@@ -476,7 +485,9 @@ case "$package" in
 			
 			touch -t "$libertine_hostUnameTimestampTouch" "$(libertine_public_outputMiscPath)"/vmlinuz
 			
-			unxz --stdout "$(libertine_public_inputMakePath linux)"/usr/initramfs_data.cpio.xz | "$(libertine_public_outputMiscPath)" initramfs.cpio
+			_libertine_compile_linux_copyInitramfs
+			
+			_libertine_compile_linux_createEfiSystemPartition
 		}
 		
 		build_needs mkdir rm
@@ -594,7 +605,7 @@ case "$package" in
 			# Combine initramfs sysroots and give all files and folder the same timestamp
 			libertine_public_iterateOverAllProductionPackagesInReverseDependencyOrder 'linux' _libertine_compile_linux_initramfs_mergeInitramfsSysroots 1>&2
 			chmod 0755 "$cpioOutputRootFolderPath"  # Forces what will become '/' to have correct permissions after rsync merge
-			find . -depth -print0 | xargs -0 touch -c -h -t "$libertine_hostUnameTimestampTouch"
+			find . -depth -print0 | xargs -0 touch -c -h -t "$cpioOutputParentFolderPath"
 			
 			
 			local generatedPackagesFilePath="$cpioOutputParentFolderPath"/000-generated.initramfs.contents
@@ -1029,6 +1040,100 @@ case "$package" in
 			chmod +x "$fileToChange"
 		}
 		
+		_libertine_compile_linux_copyInitramfs()
+		{
+			xz --decompress --stdout "$(libertine_public_inputMakePath linux)"/usr/initramfs_data.cpio.xz >"$(libertine_public_outputMiscPath)"/initramfs.cpio
+		}
+
+		build_needs mkdir cp touch stat dd mkfs.fat rm mount rsync mlbinstall umount
+		_libertine_compile_linux_createEfiSystemPartition()
+		{
+			if [ -z "$libertine_hostEfi" ]; then
+				return 0
+			fi
+			
+			# Prepare files on UEFI system partition on regular Linux disk.
+				local efiSystemPartitionFolderPath="$(libertine_public_inputMakePath)"/uefi/efi-system-partition
+				mkdir -m 0700 -p "$efiSystemPartitionFolderPath"
+				pushd "$efiSystemPartitionFolderPath"
+			
+					mkdir -m 0700 -p EFI/BOOT
+					cp "$(libertine_public_outputMiscPath)"/vmlinuz EFI/BOOT/BOOT${libertine_hostEfi}.EFI
+					chmod 0500 EFI/BOOT/BOOT${libertine_hostEfi}.EFI
+					touch -t "$libertine_hostUnameTimestampTouch" EFI/BOOT/BOOT${libertine_hostEfi}.EFI
+					touch -t "$libertine_hostUnameTimestampTouch" EFI/BOOT
+					touch -t "$libertine_hostUnameTimestampTouch" EFI
+			
+					mkdir -m 0700 -p EFI/Microsoft/BOOT
+					cp "$(libertine_public_outputMiscPath)"/vmlinuz EFI/Microsoft/BOOT/bootmgfw.efi
+					chmod 0500 EFI/Microsoft/BOOT/bootmgfw.efi
+					touch -t "$libertine_hostUnameTimestampTouch" EFI/Microsoft/BOOT/bootmgfw.efi
+					touch -t "$libertine_hostUnameTimestampTouch" EFI/Microsoft/BOOT
+					touch -t "$libertine_hostUnameTimestampTouch" EFI/Microsoft
+					touch -t "$libertine_hostUnameTimestampTouch" EFI
+			
+					printf 'echo -off\r\n%s\r\n' "EFI\BOOT\BOOT${libertine_hostEfi}.EFI" >startup.nsh
+					touch -t "$libertine_hostUnameTimestampTouch" startup.nsh
+					chmod 0500 startup.nsh
+
+					local rawEfiSizeInBytes="$(stat -c '%s' EFI)"
+				popd
+			
+			# Calculate UEFI system partition size.
+				# If using 512-byte clusters...
+				if [ $rawEfiSizeInBytes -lt 33549824 ]; then
+					rawEfiSizeInBytes=33549824
+				fi
+
+				local rawEfiSizeInKilobytes=$(( (rawEfiSizeInBytes + 1023) / 1024))
+				local partitionSizeinKilobytes=$(( rawEfiSizeInKilobytes * 32 / 28 ))
+			
+			# Create an UEFI partition image.
+				local vfatPartitionImageOutputFile="$(libertine_public_outputMiscPath)"/libertine-linux.vfat-partition.img
+				dd if=/dev/zero of="$vfatPartitionImageOutputFile" bs=1024 count="$partitionSizeinKilobytes"
+
+				local bootMessageFile="$(libertine_public_inputMakePath)"/boot-message-file.txt
+				printf 'Invalid Boot Disc\n' >"$bootMessageFile"
+				
+				# Could use 1st 11 characters of machine name for disk name, and 1st 4 characters for serial id.
+				mkfs.fat --invariant -F 32 -f 2 -D 0x80 -M 0xF8 -R 32 -S 512 -n "Libertine" -i ffffffff -m "$bootMessageFile" "$vfatPartitionImageOutputFile"
+			
+				rm "$bootMessageFile"
+			
+			# Copy files to partition image and make 
+				local mountFolderPath="${destinationFile}".mount
+				mkdir -m 0755 -p "$mountFolderPath"
+				mount -t vfat -w "$vfatPartitionImageOutputFile" "$mountFolderPath" -o loop,noatime,nodiratime,norelatime,nodev,noexec,nosuid,unbindable,rw,check=strict,conv=binary,tz=UTC,iocharset=iso8859-1,flush
+			
+				# rsync can not transfer all attributes to a VFAT filesystem.
+					set +e
+					rsync -a -v "$efiSystemPartitionFolderPath"/ "$mountFolderPath"/
+					set -e
+				
+				# Make bootable
+					local linuxCommandLine=''
+					mlbinstall "$vfatPartitionImageOutputFile" "$mountFolderPath"/EFI/BOOT/BOOT${libertine_hostEfi}.EFI "$linuxCommandLine"
+			
+				umount "$mountFolderPath"
+				rm -rf "$mountFolderPath"
+			
+			# Create a bootable ISO-9960 image using either mkisofs in cdrtools or genisofs in crdkit.
+				# local isoImageDestinationFile="$(libertine_public_outputMiscPath)"/libertine-linux.iso
+				# pushd "$efiSystemPartitionFolderPath"
+				# mkisofs -A 'Libertine Linux' -V "$libertine_machine" -volset "$libertine_machine" -J -r -v -x ./lost+found -o "$isoImageDestinationFile" -eltorito-alt-boot -efi-boot "$vfatPartitionImageOutputFile" -no-emul-boot ./
+				# popd
+			
+			# Create a bootable GPT-partitioned USB image
+				local vfatGptDiskImageOutputFile="$(libertine_public_outputMiscPath)"/libertine-linux.efi-gpt-disk.img
+				local rawGptDiskSizeInBytes="$(stat -c '%s' "$vfatPartitionImageOutputFile")"
+				local rawGptDiskSizeInKilobytes=$(( rawFatSizeInBytes * 1024 ))
+				local gptDiskSizeInKilobytes=$(( rawGptDiskSizeInKilobytes + 2048 ))
+				dd if=/dev/zero of="$vfatGptDiskImageOutputFile" bs=1024 count="$gptDiskSizeInKilobytes"
+				sgdisk -n 1:2048:0 -t 1:EF00 -g "$vfatGptDiskImageOutputFile"
+				dd if="$vfatPartitionImageOutputFile" of="$vfatGptDiskImageOutputFile" bs=512 seek=2048 conv=notrunc
+			
+			rm -rf "$efiSystemPartitionFolderPath"
+		}
 	;;
 	
 esac
