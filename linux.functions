@@ -447,6 +447,14 @@ case "$package" in
 		depends build_gptfdisk
 		build_needs sgdisk
 		
+		depends build_netbsd_src_pax
+		build_needs pax
+
+		depends build_libressl
+		build_needs openssl
+		
+		depends ipxe
+		
 		build_needs touch
 		libertine_compile_linux()
 		{
@@ -454,20 +462,6 @@ case "$package" in
 			local initramfsContentsFolderPath="$inputPath"/initramfs
 			local outputInitramFsGenerateFilePath="$inputPath"/initramfs.contents
 			local configFilePath="$inputPath"/.config
-			
-			local linux_machine="$libertine_machine"
-
-			if core_variable_isUnset linux_domain; then
-				linux_domain="$libertine_hostUnameDomainName"
-			fi
-			
-			if core_variable_isUnset linux_resolvConf_search; then
-				linux_resolvConf_search="$linux_domain"
-			fi
-
-			if core_variable_isUnset linux_resolvConf_nameservers; then
-				linux_resolvConf_nameservers='1.1.1.1 1.0.0.1 2606:4700:4700::1111 2606:4700:4700::1001'
-			fi
 			
 			_libertine_compile_linux_copyLinuxPrepOutputAndRemoveUnwantedInitramfsStuff
 			
@@ -483,11 +477,15 @@ case "$package" in
 			
 			_libertine_compile_linux_make "$inputPath" INSTALL_PATH="$(libertine_public_outputMiscPath)" install
 			
-			touch -t "$libertine_hostUnameTimestampTouch" "$(libertine_public_outputMiscPath)"/vmlinuz
+			libertine_public_touchWithKnownDateTime "$(libertine_public_outputMiscPath)"/vmlinuz
 			
 			_libertine_compile_linux_copyInitramfs
 			
 			_libertine_compile_linux_createEfiSystemPartition
+			
+			_libertine_compile_linux_createChainloadedIpxeBootScript
+			
+			_libertine_compile_linux_signLinux
 		}
 		
 		build_needs mkdir rm
@@ -513,11 +511,11 @@ case "$package" in
 		{
 			local configFilePath="$1"
 			
-			libertine_public_menuconfig_adjust CONFIG_DEFAULT_HOSTNAME "$linux_machine" true "$configFilePath"
+			libertine_public_menuconfig_adjust CONFIG_DEFAULT_HOSTNAME "$libertine_machine" true "$configFilePath"
 			
 			pushd "$(libertine_public_inputMakePath)"
 				
-				sed -i -e 's;#define UTS_DOMAINNAME "(none)";#define UTS_DOMAINNAME "'"$linux_domain"'";g' include/linux/uts.h
+				sed -i -e 's;#define UTS_DOMAINNAME "(none)";#define UTS_DOMAINNAME "'"$machine_networkingDomain"'";g' include/linux/uts.h
 				
 				rm -rf \
 					arch/x86/boot/compressed/aslr.o \
@@ -605,7 +603,7 @@ case "$package" in
 			# Combine initramfs sysroots and give all files and folder the same timestamp
 			libertine_public_iterateOverAllProductionPackagesInReverseDependencyOrder 'linux' _libertine_compile_linux_initramfs_mergeInitramfsSysroots 1>&2
 			chmod 0755 "$cpioOutputRootFolderPath"  # Forces what will become '/' to have correct permissions after rsync merge
-			find . -depth -print0 | xargs -0 touch -c -h -t "$cpioOutputParentFolderPath"
+			find . -depth -print0 | xargs -0 touch -c -h -t "$libertine_hostUnameTimestampTouch"
 			
 			
 			local generatedPackagesFilePath="$cpioOutputParentFolderPath"/000-generated.initramfs.contents
@@ -675,16 +673,16 @@ case "$package" in
 			mkdir -m 0755 -p "$etcFolderPath"
 			
 			# Create /etc/hostname
-			printf '%s\n' "$linux_machine" >"$etcFolderPath"/hostname
+			printf '%s\n' "$libertine_machine" >"$etcFolderPath"/hostname
 			
 			# Create /etc/dnsdomainname
-			printf '%s\n' "$linux_domain" >"$etcFolderPath"/dnsdomainname
+			printf '%s\n' "$machine_networkingDomain" >"$etcFolderPath"/dnsdomainname
 			
 			# Create /etc/resolv.conf
 			{
-				printf 'domain %s\n' "$linux_resolvConf_search"
+				printf 'domain %s\n' "$machine_networkingResolvConfDomain"
 				
-				IFS=' ' set -- $linux_resolvConf_nameservers
+				IFS=' ' set -- $machine_networkingIpv4DomainNameServers $machine_networkingIpv6DomainNameServers
 				local nameserver
 				for nameserver in "$@"
 				do
@@ -732,8 +730,8 @@ case "$package" in
 			shift 1
 			
 			sed \
-				-e '/^$/d' \
 				-e '/^#/d' \
+				-e '/^\s*$/d' \
 				"$(libertine_public_outputInitramfsContentsFilePath "$package")" \
 				>>"$mergedFilePath"
 		}
@@ -800,6 +798,10 @@ case "$package" in
 		
 						nosort)
 							_libertine_compile_linux_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost nosort
+						;;
+		
+						interfaces)
+							_libertine_compile_linux_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost interfaces
 						;;
 		
 						*)
@@ -919,11 +921,23 @@ case "$package" in
 				chmod "$permissions" "$individualFilePath"
 		
 				# Remove comments and empty lines and append to a temporary file
-				sed -e '/^#/d' -e '/^$/d' "$individualFilePath" >>"$temporaryFilePath"
+				sed -e '/^#/d' -e '/^\s*$/d' "$individualFilePath" >>"$temporaryFilePath"
 				hasFiles=true
 			done
 			set -f
-	
+			
+			# Template
+			local TMP_FILE
+			core_temporaryFiles_newFileToRemoveOnExit
+			local heredocWrapperFilePath="$TMP_FILE"
+			
+			{
+				printf 'cat >"$combinedFilePath" <<EOF\n'
+				cat "$temporaryFilePath"
+				printf '\nEOF\n'
+			} >"$heredocWrapperFilePath"
+			. "$heredocWrapperFilePath"
+			
 			_libertine_compile_linux_initramfs_combineSnippetsAndRemoveFromInitramfsmergeStrategyForMost_action_$actionToTake
 			
 			if [ -e "$combinedFilePath" ]; then
@@ -1040,9 +1054,14 @@ case "$package" in
 			chmod +x "$fileToChange"
 		}
 		
+		build_needs mv xz pax
 		_libertine_compile_linux_copyInitramfs()
 		{
-			xz --decompress --stdout "$(libertine_public_inputMakePath linux)"/usr/initramfs_data.cpio.xz >"$(libertine_public_outputMiscPath)"/initramfs.cpio
+			mv "$(libertine_public_inputMakePath linux)"/usr/initramfs_data.cpio.xz "$(libertine_public_outputMiscPath)"/initramfs.cpio.xz
+			libertine_public_touchWithKnownDateTime "$(libertine_public_outputMiscPath)"/initramfs.cpio.xz
+			
+			xz --decompress --stdout "$(libertine_public_outputMiscPath)"/initramfs.cpio.xz | pax -r -w -x ustar -p o -p p | xz --compress -9 --extreme --stdout >"$(libertine_public_outputMiscPath)"/initramfs.tar.xz
+			libertine_public_touchWithKnownDateTime "$(libertine_public_outputMiscPath)"/initramfs.tar.xz
 		}
 
 		build_needs mkdir cp touch stat dd mkfs.fat rm mount rsync mlbinstall umount
@@ -1060,20 +1079,20 @@ case "$package" in
 					mkdir -m 0700 -p EFI/BOOT
 					cp "$(libertine_public_outputMiscPath)"/vmlinuz EFI/BOOT/BOOT${libertine_hostEfi}.EFI
 					chmod 0500 EFI/BOOT/BOOT${libertine_hostEfi}.EFI
-					touch -t "$libertine_hostUnameTimestampTouch" EFI/BOOT/BOOT${libertine_hostEfi}.EFI
-					touch -t "$libertine_hostUnameTimestampTouch" EFI/BOOT
-					touch -t "$libertine_hostUnameTimestampTouch" EFI
+					libertine_public_touchWithKnownDateTime EFI/BOOT/BOOT${libertine_hostEfi}.EFI
+					libertine_public_touchWithKnownDateTime EFI/BOOT
+					libertine_public_touchWithKnownDateTime EFI
 			
 					mkdir -m 0700 -p EFI/Microsoft/BOOT
 					cp "$(libertine_public_outputMiscPath)"/vmlinuz EFI/Microsoft/BOOT/bootmgfw.efi
 					chmod 0500 EFI/Microsoft/BOOT/bootmgfw.efi
-					touch -t "$libertine_hostUnameTimestampTouch" EFI/Microsoft/BOOT/bootmgfw.efi
-					touch -t "$libertine_hostUnameTimestampTouch" EFI/Microsoft/BOOT
-					touch -t "$libertine_hostUnameTimestampTouch" EFI/Microsoft
-					touch -t "$libertine_hostUnameTimestampTouch" EFI
+					libertine_public_touchWithKnownDateTime EFI/Microsoft/BOOT/bootmgfw.efi
+					libertine_public_touchWithKnownDateTime EFI/Microsoft/BOOT
+					libertine_public_touchWithKnownDateTime EFI/Microsoft
+					libertine_public_touchWithKnownDateTime EFI
 			
 					printf 'echo -off\r\n%s\r\n' "EFI\BOOT\BOOT${libertine_hostEfi}.EFI" >startup.nsh
-					touch -t "$libertine_hostUnameTimestampTouch" startup.nsh
+					libertine_public_touchWithKnownDateTime startup.nsh
 					chmod 0500 startup.nsh
 
 					local rawEfiSizeInBytes="$(stat -c '%s' EFI)"
@@ -1097,6 +1116,7 @@ case "$package" in
 				
 				# Could use 1st 11 characters of machine name for disk name, and 1st 4 characters for serial id.
 				mkfs.fat --invariant -F 32 -f 2 -D 0x80 -M 0xF8 -R 32 -S 512 -n "Libertine" -i ffffffff -m "$bootMessageFile" "$vfatPartitionImageOutputFile"
+				libertine_public_touchWithKnownDateTime "$vfatPartitionImageOutputFile"
 			
 				rm "$bootMessageFile"
 			
@@ -1129,10 +1149,37 @@ case "$package" in
 				local rawGptDiskSizeInKilobytes=$(( rawFatSizeInBytes * 1024 ))
 				local gptDiskSizeInKilobytes=$(( rawGptDiskSizeInKilobytes + 2048 ))
 				dd if=/dev/zero of="$vfatGptDiskImageOutputFile" bs=1024 count="$gptDiskSizeInKilobytes"
-				sgdisk -n 1:2048:0 -t 1:EF00 -g "$vfatGptDiskImageOutputFile"
+				sgdisk --new 1:2048:0 --typecode 1:EF00 --mbrtogpt --change-name=1:'Libertine' --partition-guid 1:E6DBA0B7-973D-44B5-8CFA-478A05165684 --disk-guid 1AE17BF1-AE63-4FA0-AAED-16C6EEE8EFB9 "$vfatGptDiskImageOutputFile"
 				dd if="$vfatPartitionImageOutputFile" of="$vfatGptDiskImageOutputFile" bs=512 seek=2048 conv=notrunc
-			
+				libertine_public_touchWithKnownDateTime "$vfatGptDiskImageOutputFile"
+				
 			rm -rf "$efiSystemPartitionFolderPath"
+		}
+		
+		build_needs cat touch
+		_libertine_compile_linux_createChainloadedIpxeBootScript()
+		{
+			# This script is suitable as a vultr.com ipxe boot script: https://www.vultr.com/api/#startupscript_create
+			cat >"$(libertine_public_outputMiscPath)"/boot.ipxe <<-EOF
+				#!ipxe
+				
+				kernel https://${linux_pxeBootServer}/machines/${libertine_machine}/libertine-linux.vmlinuz
+				boot vmlinuz
+			EOF
+			
+			libertine_public_touchWithKnownDateTime "$(libertine_public_outputMiscPath)"/boot.ipxe
+		}
+		
+		build_needs openssl
+		_libertine_compile_linux_signLinux()
+		{
+			libertine_openssl_initializeCertificateAuthority
+			
+			libertine_openssl_perMachineKernelCodeSigningCertificate
+			
+			libertine_openssl_codeSign "$(libertine_public_outputMiscPath)"/vmlinuz "$(libertine_public_outputMiscPath)"/vmlinuz.sig
+			
+			libertine_public_touchWithKnownDateTime "$(libertine_public_outputMiscPath)"/vmlinuz.sig
 		}
 	;;
 	
