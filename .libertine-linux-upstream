@@ -1,0 +1,5 @@
+spl_upstream	https://github.com/zfsonlinux/spl
+zfs_upstream	https://github.com/zfsonlinux/zfs
+upstream	https://kernel.googlesource.com/pub/scm/linux/kernel/git/stable/linux-stable.git
+linux-patches	https://github.com/libertine-linux/linux-patches.git
+linux-firmware	https://kernel.googlesource.com/pub/scm/linux/kernel/git/firmware/linux-firmware.git
