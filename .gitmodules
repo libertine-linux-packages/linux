@@ -1,15 +1,25 @@
 [submodule "spl_upstream"]
 	path = spl_upstream
-	url = https://github.com/zfsonlinux/spl
+	url = https://github.com/libertine-linux-clones/spl_upstream.git
+	branch = master
+	libertine-linux-upstream = https://github.com/zfsonlinux/spl
 [submodule "zfs_upstream"]
 	path = zfs_upstream
-	url = https://github.com/zfsonlinux/zfs
+	url = https://github.com/libertine-linux-clones/zfs_upstream.git
+	branch = master
+	libertine-linux-upstream = https://github.com/zfsonlinux/zfs
 [submodule "upstream"]
 	path = upstream
 	url = https://kernel.googlesource.com/pub/scm/linux/kernel/git/stable/linux-stable.git
+	branch = master
+	libertine-linux-upstream = https://kernel.googlesource.com/pub/scm/linux/kernel/git/stable/linux-stable.git
 [submodule "linux-patches"]
 	path = linux-patches
 	url = https://github.com/libertine-linux/linux-patches.git
+	branch = master
+	libertine-linux-upstream = https://github.com/libertine-linux/linux-patches.git
 [submodule "linux-firmware"]
 	path = linux-firmware
 	url = https://kernel.googlesource.com/pub/scm/linux/kernel/git/firmware/linux-firmware.git
+	branch = master
+	libertine-linux-upstream = https://kernel.googlesource.com/pub/scm/linux/kernel/git/firmware/linux-firmware.git
