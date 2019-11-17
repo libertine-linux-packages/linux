@@ -18,3 +18,7 @@
 	path = linux-firmware
 	url = https://kernel.googlesource.com/pub/scm/linux/kernel/git/firmware/linux-firmware.git
 	branch = master
+	update = checkout
+	ignore = none
+	fetchRecurseSubmodules = true
+	shallow = true
