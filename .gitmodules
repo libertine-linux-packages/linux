@@ -5,7 +5,7 @@
 	update = checkout
 	ignore = none
 	fetchRecurseSubmodules = true
-	shallow = true
+	shallow = false
 [submodule "zfs_upstream"]
 	path = zfs_upstream
 	url = https://github.com/libertine-linux-clones/zfs.git
@@ -13,7 +13,7 @@
 	update = checkout
 	ignore = none
 	fetchRecurseSubmodules = true
-	shallow = true
+	shallow = false
 [submodule "upstream"]
 	path = upstream
 	url = https://kernel.googlesource.com/pub/scm/linux/kernel/git/stable/linux-stable.git
@@ -21,7 +21,7 @@
 	update = checkout
 	ignore = none
 	fetchRecurseSubmodules = true
-	shallow = true
+	shallow = false
 [submodule "linux-patches"]
 	path = linux-patches
 	url = https://github.com/libertine-linux/linux-patches.git
@@ -29,7 +29,7 @@
 	update = checkout
 	ignore = none
 	fetchRecurseSubmodules = true
-	shallow = true
+	shallow = false
 [submodule "linux-firmware"]
 	path = linux-firmware
 	url = https://kernel.googlesource.com/pub/scm/linux/kernel/git/firmware/linux-firmware.git
@@ -37,4 +37,4 @@
 	update = checkout
 	ignore = none
 	fetchRecurseSubmodules = true
-	shallow = true
+	shallow = false
