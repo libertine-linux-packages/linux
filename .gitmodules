@@ -2,6 +2,10 @@
 	path = spl_upstream
 	url = https://github.com/libertine-linux-clones/spl_upstream.git
 	branch = master
+	update = checkout
+	ignore = none
+	fetchRecurseSubmodules = true
+	shallow = true
 [submodule "zfs_upstream"]
 	path = zfs_upstream
 	url = https://github.com/libertine-linux-clones/zfs_upstream.git
