@@ -14,6 +14,10 @@
 	path = linux-patches
 	url = https://github.com/libertine-linux/linux-patches.git
 	branch = master
+	update = checkout
+	ignore = none
+	fetchRecurseSubmodules = true
+	shallow = true
 [submodule "linux-firmware"]
 	path = linux-firmware
 	url = https://kernel.googlesource.com/pub/scm/linux/kernel/git/firmware/linux-firmware.git
