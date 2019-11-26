@@ -446,7 +446,7 @@ case "$package" in
 		depends build_gptfdisk
 		build_needs sgdisk
 		
-		depends build_netbsd_src_pax
+		depends build_pax
 		build_needs pax
 
 		depends build_libressl
